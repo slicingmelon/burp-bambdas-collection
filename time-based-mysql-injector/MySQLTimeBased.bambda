@@ -32,6 +32,8 @@ source: |+
   var bypassCache = true;
   var detectionThresholdMs = 20000L;
   
+  var detectionFound = false;
+  
   var baseRequest = requestResponse.request();
   if (baseRequest == null) return;
   
@@ -46,6 +48,8 @@ source: |+
   
   var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
   var secureRandom = new java.security.SecureRandom();
+  
+  logging().logToOutput("[MySQLTimeBased] Started...");
   
   for (int i = 0; i < pairs.length; i++) {
       var pair = pairs[i];
@@ -75,7 +79,7 @@ source: |+
           var mutatedPath = basePath + "?" + builder.toString();
           var mutatedRequest = baseRequest.withPath(mutatedPath);
 
-          logging().logToOutput("[MySQLTimeBased] Started...");
+          
 
           var result = api().http().sendRequest(mutatedRequest);
           if (!result.hasResponse()) {
@@ -96,9 +100,28 @@ source: |+
               logging().logToOutput("[MySQLTimeBased] SQL injection detected in param " + name + " using payload: " + payload);
               httpEditor.responsePane().set(result.response().toByteArray());
               httpEditor.requestPane().set(mutatedRequest.toByteArray());
-          } else {
-              logging().logToOutput("[MySQLTimeBased] No findings for param " + name + " using payload: " + payload);
+              detectionFound = true;
+              
+              var detail = String.format("Parameter '%s' was vulnerable to time-based SQL injection when payload '%s' was used (response took %dms).", name, payload, endMs);
+              api().siteMap().add(
+                  burp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue(
+                      "MySQL Time Based Injection",
+                      detail,
+                      "Sanitize input to prevent SQL injections.",
+                      mutatedRequest.url(),
+                      burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
+                      burp.api.montoya.scanner.audit.issues.AuditIssueConfidence.CERTAIN,
+                      "",
+                      "",
+                      burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
+                      result
+                  )
+              );
           }
       }
+  }
+  
+  if (!detectionFound) {
+      logging().logToOutput("[MySQLTimeBased] No findings.");
   }
 
