@@ -1,5 +1,5 @@
 id: a1c7e97b-71c8-459f-8d07-691863687ca1
-name: MySQLTimeBased
+name: MySQL Time-Based 
 function: CUSTOM_ACTION
 location: REPEATER
 source: |+
@@ -8,6 +8,7 @@ source: |+
    * Sends each mutated request sequentially and logs high-level timing data
    * so you can watch for slow responses in Logger or the console.
    * Also reports the findings to the Issues dashboard.
+   * @author slicingmelon
    **/
   
   var payloads = java.util.List.of(
