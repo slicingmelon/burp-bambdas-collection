@@ -94,7 +94,7 @@ source: |+
           long startMs = (tStart != null ? tStart.toMillis() : -1);
           long endMs = (tEnd != null ? tEnd.toMillis() : -1);
 
-          if (endMs >= detectionThresholdMs && endMs != -1) {
+          if (startMs >= detectionThresholdMs && startMs != -1) {
               logging().logToOutput("[MySQLTimeBased] SQL injection detected in param " + name + " using payload: " + payload);
               httpEditor.responsePane().set(result.response().toByteArray());
               httpEditor.requestPane().set(mutatedRequest.toByteArray());
