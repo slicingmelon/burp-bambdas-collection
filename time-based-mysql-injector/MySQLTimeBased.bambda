@@ -1,5 +1,5 @@
 id: a1c7e97b-71c8-459f-8d07-691863687ca1
-name: MySQL Time-Based Injector
+name: MySQLTimeBased
 function: CUSTOM_ACTION
 location: REPEATER
 source: |+
@@ -7,6 +7,7 @@ source: |+
    * Append a time-based MySQL payload to each query parameter, one at a time.
    * Sends each mutated request sequentially and logs high-level timing data
    * so you can watch for slow responses in Logger or the console.
+   * Also reports the findings to the Issues dashboard.
    **/
   
   var payloads = java.util.List.of(
@@ -50,7 +51,7 @@ source: |+
   var secureRandom = new java.security.SecureRandom();
   
   logging().logToOutput("[MySQLTimeBased] Started...");
-  
+
   for (int i = 0; i < pairs.length; i++) {
       var pair = pairs[i];
       int sep = pair.indexOf('=');
