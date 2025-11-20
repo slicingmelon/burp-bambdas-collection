@@ -48,7 +48,6 @@ source: |+
   if (pairs.length == 0) return;
   
   var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
-  var secureRandom = new java.security.SecureRandom();
   
   logging().logToOutput("[MySQLTimeBased] Started...");
 
@@ -70,10 +69,7 @@ source: |+
           }
   
           if (bypassCache) {
-              var cacheBuster = new StringBuilder();
-              for (int k = 0; k < 14; k++) {
-                  cacheBuster.append(alphabet.charAt(secureRandom.nextInt(alphabet.length())));
-              }
+              var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
               builder.append("&_czb=").append(cacheBuster);
           }
   
