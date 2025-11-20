@@ -1,2 +1,3 @@
-# burp-bamdas-collection
-A personal collection of Burp Suite bamdas scripts
+# burp-bambdas-collection
+
+A personal collection of Burp Suite bambdas scripts.
