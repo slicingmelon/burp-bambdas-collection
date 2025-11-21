@@ -75,15 +75,18 @@ source: |+
         
         // Handle different field types
         if (targetValueNode.isString() || targetValueNode.isNull()) {
-          // Inject into string field
+          String originalValue = targetValueNode.isString() ? targetValueNode.asString() : "";
+          boolean isEmpty = originalValue.isEmpty();
+          
+          // Test 1: Inject as string
           var newJsonObj = JsonObjectNode.jsonObjectNode();
           for (var e : jsonMap.entrySet()) {
             String k = e.getKey();
             var valueNode = e.getValue();
             
             if (k.equals(targetKey)) {
-              String originalValue = valueNode.isString() ? valueNode.asString() : "";
-              newJsonObj.putString(k, originalValue + payload);
+              String origVal = valueNode.isString() ? valueNode.asString() : "";
+              newJsonObj.putString(k, origVal + payload);
             } else {
               // Preserve original value with correct type
               if (valueNode.isString()) {
@@ -97,6 +100,33 @@ source: |+
           }
           String mutatedJsonStr = minifyJson.apply(newJsonObj.toJsonString());
           results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey, mutatedJsonStr));
+          
+          // Test 2: If field is empty, also try as array (we don't know if backend expects string or array)
+          if (isEmpty) {
+            var newJsonObjArray = JsonObjectNode.jsonObjectNode();
+            for (var e : jsonMap.entrySet()) {
+              String k = e.getKey();
+              var valueNode = e.getValue();
+              
+              if (k.equals(targetKey)) {
+                // Create array with payload
+                var payloadArray = JsonArrayNode.jsonArrayNode();
+                payloadArray.addString(payload);
+                newJsonObjArray.put(k, payloadArray);
+              } else {
+                // Preserve original value with correct type
+                if (valueNode.isString()) {
+                  newJsonObjArray.putString(k, valueNode.asString());
+                } else if (valueNode.isNull()) {
+                  newJsonObjArray.put(k, JsonNullNode.jsonNullNode());
+                } else {
+                  newJsonObjArray.put(k, valueNode);
+                }
+              }
+            }
+            String mutatedJsonStrArray = minifyJson.apply(newJsonObjArray.toJsonString());
+            results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey + "[]", mutatedJsonStrArray));
+          }
           
         } else if (targetValueNode.isArray()) {
           // Inject into each string element in the array
