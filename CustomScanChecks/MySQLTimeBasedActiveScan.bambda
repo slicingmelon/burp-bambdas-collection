@@ -232,8 +232,8 @@ source: |
     } else {
       // Handle regular parameter
       for (String payload : payloads) {
-        var encodedPayload = customUrlEncode.apply(payload);
-        var mutatedRequest = insertionPoint.buildHttpRequestWithPayload(ByteArray.byteArray(baseValue + encodedPayload));
+        // Don't encode - insertionPoint handles encoding per API spec
+        var mutatedRequest = insertionPoint.buildHttpRequestWithPayload(ByteArray.byteArray(baseValue + payload));
         
         var result = http.sendRequest(mutatedRequest);
         if (!result.hasResponse()) continue;
