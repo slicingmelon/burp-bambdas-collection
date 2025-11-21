@@ -75,7 +75,7 @@ source: |+
               if (valueNode.isString()) {
                 newJsonObj.putString(k, valueNode.asString());
               } else if (valueNode.isNull()) {
-                newJsonObj.putNull(k);
+                newJsonObj.put(k, JsonNullNode.jsonNullNode());
               } else {
                 newJsonObj.put(k, valueNode);
               }
@@ -87,7 +87,7 @@ source: |+
         } else if (targetValueNode.isArray()) {
           // Inject into each string element in the array
           var targetArray = targetValueNode.asArray();
-          int arraySize = targetArray.size();
+          int arraySize = targetArray.asList().size();
           
           for (int i = 0; i < arraySize; i++) {
             var arrayElement = targetArray.get(i);
@@ -112,7 +112,7 @@ source: |+
                       if (elem.isString()) {
                         newArray.addString(elem.asString());
                       } else if (elem.isNull()) {
-                        newArray.addNull();
+                        newArray.add(JsonNullNode.jsonNullNode());
                       } else {
                         newArray.add(elem);
                       }
@@ -124,7 +124,7 @@ source: |+
                   if (valueNode.isString()) {
                     newJsonObj.putString(k, valueNode.asString());
                   } else if (valueNode.isNull()) {
-                    newJsonObj.putNull(k);
+                    newJsonObj.put(k, JsonNullNode.jsonNullNode());
                   } else {
                     newJsonObj.put(k, valueNode);
                   }
