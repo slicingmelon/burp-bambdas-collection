@@ -182,6 +182,9 @@ source: |
     return AuditResult.auditResult();
   }
   
+  // Accumulate all issues found
+  var issues = new java.util.ArrayList<AuditIssue>();
+  
   for (HttpParameter parameter : urlParameters) {
     String name = parameter.name();
     String value = parameter.value();
@@ -221,7 +224,7 @@ source: |
               name, jsonField, payload, startMs
             );
             
-            return AuditResult.auditResult(
+            issues.add(
               AuditIssue.auditIssue(
                 "MySQL Time-Based SQL Injection (JSON)",
                 detail,
@@ -262,7 +265,7 @@ source: |
             name, payload, startMs
           );
           
-          return AuditResult.auditResult(
+          issues.add(
             AuditIssue.auditIssue(
               "MySQL Time-Based SQL Injection",
               detail,
@@ -281,5 +284,10 @@ source: |
     }
   }
   
-  return AuditResult.auditResult();
+  // Return all issues found (or empty if none)
+  if (issues.isEmpty()) {
+    return AuditResult.auditResult();
+  } else {
+    return AuditResult.auditResult(issues);
+  }
 
