@@ -49,10 +49,15 @@ source: |+
   // Helper function to minify JSON (remove pretty-print formatting from toJsonString())
   // Safe because: actual newlines/tabs only exist in formatting, NOT inside JSON string values
   // (String values have escaped \n as two chars: backslash+n, not actual newline byte)
-  // We keep spaces to avoid breaking intentional spaces in string values
   var minifyJson = (java.util.function.Function<String, String>)(jsonStr -> {
-    return jsonStr.replace("\n", "")    // Remove newlines
-                  .replace("\r", "");   // Remove carriage returns
+    return jsonStr.replace("\n", "")          // Remove newlines
+                  .replace("\r", "")          // Remove carriage returns
+                  .replaceAll("\\{\\s+", "{")    // Remove spaces after {
+                  .replaceAll("\\[\\s+", "[")    // Remove spaces after [
+                  .replaceAll("\\s+\\}", "}")    // Remove spaces before }
+                  .replaceAll("\\s+\\]", "]")    // Remove spaces before ]
+                  .replaceAll(",\\s+", ",")      // Remove spaces after ,
+                  .replaceAll(":\\s+", ":");     // Remove spaces after :
   });
 
   // Helper function to inject payload into a JSON string
