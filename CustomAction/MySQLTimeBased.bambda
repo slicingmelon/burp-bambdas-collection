@@ -98,32 +98,31 @@ var injectIntoJson = (java.util.function.BiFunction<String, String, java.util.Li
 var baseRequest = requestResponse.request();
 if (baseRequest == null) return;
 
-var originalPath = baseRequest.path();
-int queryStart = originalPath.indexOf('?');
-if (queryStart == -1 || queryStart == originalPath.length() - 1) return;
+// Get all URL parameters (order preserved by Montoya API)
+var urlParameters = baseRequest.parameters().stream()
+	.filter(p -> p.type() == HttpParameterType.URL)
+	.toList();
 
-var basePath = originalPath.substring(0, queryStart);
-var queryString = originalPath.substring(queryStart + 1);
-var pairs = queryString.split("&", -1);
-if (pairs.length == 0) return;
+if (urlParameters.isEmpty()) {
+	logging().logToOutput("[MySQLTimeBased] No URL parameters found.");
+	return;
+}
 
 var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
 
 logging().logToOutput("[MySQLTimeBased] Started...");
 
-for (int i = 0; i < pairs.length; i++) {
-	var pair = pairs[i];
-	int sep = pair.indexOf('=');
-	var name = (sep >= 0) ? pair.substring(0, sep) : pair;
-	var value = (sep >= 0) ? pair.substring(sep + 1) : "";
+for (HttpParameter parameter : urlParameters) {
+	String name = parameter.name();
+	String value = parameter.value();
 	
 	// URL decode the value to check if it's JSON
 	var decodedValue = api().utilities().urlUtils().decode(value);
 	
 	// Check if it's a JSON object
 	if (decodedValue != null && !decodedValue.isEmpty() && 
-	decodedValue.strip().startsWith("{") && decodedValue.strip().endsWith("}") &&
-	api().utilities().jsonUtils().isValidJson(decodedValue)) {
+	    decodedValue.strip().startsWith("{") && decodedValue.strip().endsWith("}") &&
+	    api().utilities().jsonUtils().isValidJson(decodedValue)) {
 		// Handle JSON parameter - inject into each JSON field
 		logging().logToOutput("[MySQLTimeBased] Detected JSON parameter: " + name);
 		
@@ -134,26 +133,23 @@ for (int i = 0; i < pairs.length; i++) {
 				var jsonField = jsonMutation.getKey();
 				var mutatedJson = jsonMutation.getValue();
 				
-				// URL encode the mutated JSON
+				// URL encode the mutated JSON (standard encoding for JSON)
 				var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
 				
-				var builder = new StringBuilder();
-				for (int j = 0; j < pairs.length; j++) {
-					if (j > 0) builder.append("&");
-					if (j == i) {
-						builder.append(name).append("=").append(encodedMutatedJson);
-					} else {
-						builder.append(pairs[j]);
-					}
-				}
+				// Create new parameter with mutated JSON
+				var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
 				
+				// Replace parameter (order preserved automatically)
+				var mutatedRequest = baseRequest.withRemovedParameters(parameter)
+				                                .withAddedParameters(newParam);
+				
+				// Add cache buster if enabled
 				if (bypassCache) {
 					var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
-					builder.append("&_czb=").append(cacheBuster);
+					mutatedRequest = mutatedRequest.withAddedParameters(
+						HttpParameter.urlParameter("_czb", cacheBuster)
+					);
 				}
-				
-				var mutatedPath = basePath + "?" + builder.toString();
-				var mutatedRequest = baseRequest.withPath(mutatedPath);
 				
 				var result = api().http().sendRequest(mutatedRequest);
 				if (!result.hasResponse()) {
@@ -200,23 +196,20 @@ for (int i = 0; i < pairs.length; i++) {
 			// Custom URL encode the payload (only space, +, #, =)
 			var encodedPayload = customUrlEncode.apply(payload);
 			
-			var builder = new StringBuilder();
-			for (int j = 0; j < pairs.length; j++) {
-				if (j > 0) builder.append("&");
-				if (j == i) {
-					builder.append(name).append("=").append(value).append(encodedPayload);
-				} else {
-					builder.append(pairs[j]);
-				}
-			}
+			// Create new parameter with payload appended
+			var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
 			
+			// Replace parameter (order preserved automatically)
+			var mutatedRequest = baseRequest.withRemovedParameters(parameter)
+			                                .withAddedParameters(newParam);
+			
+			// Add cache buster if enabled
 			if (bypassCache) {
 				var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
-				builder.append("&_czb=").append(cacheBuster);
+				mutatedRequest = mutatedRequest.withAddedParameters(
+					HttpParameter.urlParameter("_czb", cacheBuster)
+				);
 			}
-			
-			var mutatedPath = basePath + "?" + builder.toString();
-			var mutatedRequest = baseRequest.withPath(mutatedPath);
 			
 			var result = api().http().sendRequest(mutatedRequest);
 			if (!result.hasResponse()) {
