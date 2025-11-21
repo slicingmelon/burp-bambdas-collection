@@ -135,12 +135,11 @@ source: |+
 					// URL encode the mutated JSON (standard encoding for JSON)
 					var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
 					
-					// Create new parameter with mutated JSON
-					var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
-					
-					// Replace parameter (order preserved automatically)
-					var mutatedRequest = baseRequest.withRemovedParameters(parameter)
-																					.withAddedParameters(newParam);
+				// Create new parameter with mutated JSON
+				var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
+				
+				// Update parameter in place (order preserved!)
+				var mutatedRequest = baseRequest.withParameter(newParam);
 					
 					// Add cache buster if enabled
 					if (bypassCache) {
@@ -195,12 +194,11 @@ source: |+
 				// Custom URL encode the payload (only space, +, #, =)
 				var encodedPayload = customUrlEncode.apply(payload);
 				
-				// Create new parameter with payload appended
-				var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
-				
-				// Replace parameter (order preserved automatically)
-				var mutatedRequest = baseRequest.withRemovedParameters(parameter)
-																				.withAddedParameters(newParam);
+			// Create new parameter with payload appended
+			var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
+			
+			// Update parameter in place (order preserved!)
+			var mutatedRequest = baseRequest.withParameter(newParam);
 				
 				// Add cache buster if enabled
 				if (bypassCache) {
