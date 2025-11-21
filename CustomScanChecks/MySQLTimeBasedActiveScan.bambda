@@ -1,10 +1,10 @@
 id: 8fa3d7e2-9c41-4b8d-a5f6-1e2b3c4d5e6f
 name: MySQL Time-Based Active Scan
-function: SCAN_CHECK_ACTIVE_PER_REQUEST
+function: SCAN_CHECK_ACTIVE_PER_INSERTION_POINT
 location: SCANNER
 source: |
   /**
-  * Detects time-based MySQL SQL injection in URL parameters.
+  * Detects time-based MySQL SQL injection per insertion point.
   * Handles both regular parameters and JSON-encoded parameters in GET requests.
   * Tests empty JSON fields as both strings and arrays.
   * @author slicingmelon
@@ -171,25 +171,17 @@ source: |
     return results;
   });
   
+  // Burp calls this once per insertion point
+  var issues = new java.util.ArrayList<AuditIssue>();
+  
   var baseRequest = requestResponse.request();
   if (baseRequest == null) return AuditResult.auditResult();
   
-  var urlParameters = baseRequest.parameters().stream()
-    .filter(p -> p.type() == HttpParameterType.URL)
-    .toList();
+  // Get the insertion point's base value
+  var baseValue = insertionPoint.baseValue();
+  var name = insertionPoint.name();
   
-  if (urlParameters.isEmpty()) {
-    return AuditResult.auditResult();
-  }
-  
-  // Accumulate all issues found
-  var issues = new java.util.ArrayList<AuditIssue>();
-  
-  for (HttpParameter parameter : urlParameters) {
-    String name = parameter.name();
-    String value = parameter.value();
-    
-    var decodedValue = api().utilities().urlUtils().decode(value);
+  var decodedValue = api().utilities().urlUtils().decode(baseValue);
     
     // Check if it's JSON
     if (decodedValue != null && !decodedValue.isEmpty() && 
@@ -203,9 +195,8 @@ source: |
           var jsonField = jsonMutation.getKey();
           var mutatedJson = jsonMutation.getValue();
           
-          var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
-          var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
-          var mutatedRequest = baseRequest.withParameter(newParam);
+          // Use insertionPoint to build request with mutated JSON
+          var mutatedRequest = insertionPoint.buildHttpRequestWithPayload(ByteArray.byteArray(mutatedJson));
           
           var result = http.sendRequest(mutatedRequest);
           if (!result.hasResponse()) continue;
@@ -242,8 +233,7 @@ source: |
       // Handle regular parameter
       for (String payload : payloads) {
         var encodedPayload = customUrlEncode.apply(payload);
-        var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
-        var mutatedRequest = baseRequest.withParameter(newParam);
+        var mutatedRequest = insertionPoint.buildHttpRequestWithPayload(ByteArray.byteArray(baseValue + encodedPayload));
         
         var result = http.sendRequest(mutatedRequest);
         if (!result.hasResponse()) continue;
@@ -276,7 +266,6 @@ source: |
         }
       }
     }
-  }
   
   // Return all issues found (or empty if none)
   if (issues.isEmpty()) {
