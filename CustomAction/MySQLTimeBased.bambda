@@ -167,8 +167,8 @@ source: |+
 					
 					if (startMs >= detectionThresholdMs && startMs != -1) {
 						logging().logToOutput("[MySQLTimeBased] SQL injection detected in JSON param " + name + ", field: " + jsonField + ", payload: " + payload);
-						httpEditor.responsePane().set(result.response().toByteArray());
-						httpEditor.requestPane().set(mutatedRequest.toByteArray());
+						//httpEditor.responsePane().set(result.response().toByteArray());
+						//httpEditor.requestPane().set(mutatedRequest.toByteArray());
 						detectionFound = true;
 						
 						var detail = String.format("JSON parameter '%s', field '%s' was vulnerable to time-based SQL injection when payload '%s' was used (response took %dms).", name, jsonField, payload, endMs);
@@ -227,8 +227,8 @@ source: |+
 				
 				if (startMs >= detectionThresholdMs && startMs != -1) {
 					logging().logToOutput("[MySQLTimeBased] SQL injection detected in param " + name + " using payload: " + payload);
-					httpEditor.responsePane().set(result.response().toByteArray());
-					httpEditor.requestPane().set(mutatedRequest.toByteArray());
+					//httpEditor.responsePane().set(result.response().toByteArray());
+					//httpEditor.requestPane().set(mutatedRequest.toByteArray());
 					detectionFound = true;
 					
 					var detail = String.format("Parameter '%s' was vulnerable to time-based SQL injection when payload '%s' was used (response took %dms).", name, payload, endMs);
