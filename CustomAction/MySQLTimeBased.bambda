@@ -46,6 +46,15 @@ source: |+
               .replace("=", "%3D");
   });
 
+  // Helper function to minify JSON (remove pretty-print formatting from toJsonString())
+  // Safe because: actual newlines/tabs only exist in formatting, NOT inside JSON string values
+  // (String values have escaped \n as two chars: backslash+n, not actual newline byte)
+  // We keep spaces to avoid breaking intentional spaces in string values
+  var minifyJson = (java.util.function.Function<String, String>)(jsonStr -> {
+    return jsonStr.replace("\n", "")    // Remove newlines
+                  .replace("\r", "");   // Remove carriage returns
+  });
+
   // Helper function to inject payload into a JSON string
   var injectIntoJson = (java.util.function.BiFunction<String, String, java.util.List<java.util.Map.Entry<String, String>>>)((jsonStr, payload) -> {
     var results = new java.util.ArrayList<java.util.Map.Entry<String, String>>();
@@ -81,7 +90,7 @@ source: |+
               }
             }
           }
-          String mutatedJsonStr = newJsonObj.toJsonString();
+          String mutatedJsonStr = minifyJson.apply(newJsonObj.toJsonString());
           results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey, mutatedJsonStr));
           
         } else if (targetValueNode.isArray()) {
@@ -131,7 +140,7 @@ source: |+
                 }
               }
               
-              String mutatedJsonStr = newJsonObj.toJsonString();
+              String mutatedJsonStr = minifyJson.apply(newJsonObj.toJsonString());
               results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey + "[" + i + "]", mutatedJsonStr));
             }
           }
