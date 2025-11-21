@@ -1,5 +1,5 @@
 id: 8fa3d7e2-9c41-4b8d-a5f6-1e2b3c4d5e6f
-name: MySQL Time-Based
+name: MySQL Time-Based Active Scan
 function: SCAN_CHECK_ACTIVE_PER_REQUEST
 location: SCANNER
 source: |

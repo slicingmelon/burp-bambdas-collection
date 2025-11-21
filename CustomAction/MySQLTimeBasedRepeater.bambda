@@ -1,5 +1,5 @@
 id: d5e4e6f8-b728-4bc1-9685-6c2cf9a8fbe0
-name: MySQL Time-Based 
+name: MySQL Time-Based Repeater
 function: CUSTOM_ACTION
 location: REPEATER
 source: |+
