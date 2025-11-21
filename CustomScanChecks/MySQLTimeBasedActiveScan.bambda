@@ -218,22 +218,19 @@ source: |
           long startMs = (tStart != null ? tStart.toMillis() : -1);
           
           if (startMs >= detectionThresholdMs && startMs != -1) {
-            var detail = String.format(
-              "<p>The JSON parameter <code>%s</code>, field <code>%s</code> appears to be vulnerable to time-based SQL injection.</p>" +
-              "<p>The payload <code>%s</code> caused the server to delay for approximately %d milliseconds.</p>",
-              name, jsonField, payload, startMs
-            );
+            var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
+              name, jsonField, payload, startMs);
             
             issues.add(
               AuditIssue.auditIssue(
                 "MySQL Time-Based SQL Injection (JSON)",
                 detail,
-                "Sanitize and validate all user input. Use parameterized queries or prepared statements.",
+                "Use parameterized queries",
                 mutatedRequest.url(),
                 AuditIssueSeverity.HIGH,
                 AuditIssueConfidence.CERTAIN,
-                "<p>Time-based SQL injection allows attackers to infer data by measuring response times.</p>",
-                "<p>Use ORM frameworks or prepared statements. Avoid concatenating user input into SQL queries.</p>",
+                "",
+                "",
                 AuditIssueSeverity.HIGH,
                 result
               )
@@ -259,22 +256,19 @@ source: |
         long startMs = (tStart != null ? tStart.toMillis() : -1);
         
         if (startMs >= detectionThresholdMs && startMs != -1) {
-          var detail = String.format(
-            "<p>The URL parameter <code>%s</code> appears to be vulnerable to time-based SQL injection.</p>" +
-            "<p>The payload <code>%s</code> caused the server to delay for approximately %d milliseconds.</p>",
-            name, payload, startMs
-          );
+          var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
+            name, payload, startMs);
           
           issues.add(
             AuditIssue.auditIssue(
               "MySQL Time-Based SQL Injection",
               detail,
-              "Sanitize and validate all user input. Use parameterized queries or prepared statements.",
+              "Use parameterized queries",
               mutatedRequest.url(),
               AuditIssueSeverity.HIGH,
               AuditIssueConfidence.CERTAIN,
-              "<p>Time-based SQL injection allows attackers to infer data by measuring response times.</p>",
-              "<p>Use ORM frameworks or prepared statements. Avoid concatenating user input into SQL queries.</p>",
+              "",
+              "",
               AuditIssueSeverity.HIGH,
               result
             )
