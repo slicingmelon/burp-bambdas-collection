@@ -520,18 +520,22 @@ source: |
             
             if (result == null || !result.hasResponse()) continue;
             
+            // Use endMs (time to end of response) for detection - this captures the full delay
+            // For time-based SQL injection, the delay happens during query execution
+            var detectionTimeMs = (endMs != -1) ? endMs : startMs;
+            
             // Log timing for debugging
             logging().logToOutput(String.format(
-              "[MySQLTimeBased] JSON param '%s' field '%s' payload '%s': timing=%dms (threshold=%dms)",
-              name, jsonField, payload, startMs, detectionThresholdMs));
+              "[MySQLTimeBased] JSON param '%s' field '%s' payload '%s': start=%dms, end=%dms, detection=%dms (threshold=%dms)",
+              name, jsonField, payload, startMs, endMs, detectionTimeMs, detectionThresholdMs));
             
-            if (startMs >= detectionThresholdMs && startMs != -1) {
+            if (detectionTimeMs >= detectionThresholdMs && detectionTimeMs != -1) {
               logging().logToOutput(String.format(
-                "[MySQLTimeBased] ✓ DETECTED delay %dms on JSON param '%s' field '%s' using payload '%s'",
-                startMs, name, jsonField, payload));
+                "[MySQLTimeBased] ✓ DETECTED delay %dms (start=%dms, end=%dms) on JSON param '%s' field '%s' using payload '%s'",
+                detectionTimeMs, startMs, endMs, name, jsonField, payload));
               
               var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay (threshold: %dms)", 
-                name, jsonField, payload, startMs, detectionThresholdMs);
+                name, jsonField, payload, detectionTimeMs, detectionThresholdMs);
               
               try {
                 // Optimize memory by copying to temp file before storing in issue
@@ -652,18 +656,22 @@ source: |
           
           if (result == null || !result.hasResponse()) continue;
           
+          // Use endMs (time to end of response) for detection - this captures the full delay
+          // For time-based SQL injection, the delay happens during query execution
+          var detectionTimeMs = (endMs != -1) ? endMs : startMs;
+          
           // Log timing for debugging
           logging().logToOutput(String.format(
-            "[MySQLTimeBased] Param '%s' payload '%s': timing=%dms (threshold=%dms)",
-            name, payload, startMs, detectionThresholdMs));
+            "[MySQLTimeBased] Param '%s' payload '%s': start=%dms, end=%dms, detection=%dms (threshold=%dms)",
+            name, payload, startMs, endMs, detectionTimeMs, detectionThresholdMs));
           
-          if (startMs >= detectionThresholdMs && startMs != -1) {
+          if (detectionTimeMs >= detectionThresholdMs && detectionTimeMs != -1) {
             logging().logToOutput(String.format(
-              "[MySQLTimeBased] ✓ DETECTED delay %dms on param '%s' using payload '%s'",
-              startMs, name, payload));
+              "[MySQLTimeBased] ✓ DETECTED delay %dms (start=%dms, end=%dms) on param '%s' using payload '%s'",
+              detectionTimeMs, startMs, endMs, name, payload));
             
             var detail = String.format("Param '%s' with payload '%s' caused %dms delay (threshold: %dms)", 
-              name, payload, startMs, detectionThresholdMs);
+              name, payload, detectionTimeMs, detectionThresholdMs);
             
             try {
               // Optimize memory by copying to temp file before storing in issue
