@@ -547,11 +547,18 @@ source: |
           
           if (result == null || !result.hasResponse()) continue;
           
-          if (startMs >= detectionThresholdMs && startMs != -1) {
-            logging().logToOutput("[MySQLTimeBased] FOUND! JSON param '" + name + "' field '" + jsonField + "' took " + startMs + "ms (start) / " + endMs + "ms (end)");
+          // Use endMs (time to end of response) for detection - this captures the full delay
+          // For time-based SQL injection, the delay happens during query execution
+          var detectionTimeMs = (endMs != -1) ? endMs : startMs;
+          
+          if (detectionTimeMs >= detectionThresholdMs && detectionTimeMs != -1) {
+            logging().logToOutput("[MySQLTimeBased] FOUND! JSON param '" + name + "' field '" + jsonField + "' took " + startMs + "ms (start) / " + endMs + "ms (end) / detection=" + detectionTimeMs + "ms");
             
             var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
-              name, jsonField, payload, endMs);
+              name, jsonField, payload, detectionTimeMs);
+            
+            // Optimize memory by copying to temp file before storing in issue
+            var optimizedResult = result.copyToTempFile();
             
             // Create the audit issue and return immediately (like example bambdas)
             // Continuing after a finding causes Burp internal crashes
@@ -566,7 +573,7 @@ source: |
                 "Time-based SQL injection allows attackers to extract data by observing response delays.",
                 "",
                 AuditIssueSeverity.HIGH,
-                result
+                optimizedResult
               )
             );
           }
@@ -648,11 +655,18 @@ source: |
         
         if (result == null || !result.hasResponse()) continue;
         
-        if (startMs >= detectionThresholdMs && startMs != -1) {
-          logging().logToOutput("[MySQLTimeBased] FOUND! Param '" + name + "' took " + startMs + "ms (start) / " + endMs + "ms (end)");
+        // Use endMs (time to end of response) for detection - this captures the full delay
+        // For time-based SQL injection, the delay happens during query execution
+        var detectionTimeMs = (endMs != -1) ? endMs : startMs;
+        
+        if (detectionTimeMs >= detectionThresholdMs && detectionTimeMs != -1) {
+          logging().logToOutput("[MySQLTimeBased] FOUND! Param '" + name + "' took " + startMs + "ms (start) / " + endMs + "ms (end) / detection=" + detectionTimeMs + "ms");
           
           var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
-            name, payload, endMs);
+            name, payload, detectionTimeMs);
+          
+          // Optimize memory by copying to temp file before storing in issue
+          var optimizedResult = result.copyToTempFile();
           
           // Create the audit issue and return immediately (like example bambdas)
           // Continuing after a finding causes Burp internal crashes
@@ -667,7 +681,7 @@ source: |
               "Time-based SQL injection allows attackers to extract data by observing response delays.",
               "",
               AuditIssueSeverity.HIGH,
-              result
+              optimizedResult
             )
           );
         }
