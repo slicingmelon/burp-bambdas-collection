@@ -316,18 +316,18 @@ source: |
           
           try {
             long startTime = System.currentTimeMillis();
-            result = api().http().sendRequest(mutatedRequest);
+            result = http.sendRequest(mutatedRequest);
             long endTime = System.currentTimeMillis();
             elapsedMs = endTime - startTime;
           } catch (Exception e) {
-            logging().logToError("[MySQLTimeBased] Error sending request: " + e.getMessage());
+            logging().logToError("[MySQLTimeBased] Error sending request (JSON): " + e.getMessage());
             var sw = new java.io.StringWriter();
             e.printStackTrace(new java.io.PrintWriter(sw));
             logging().logToError(sw.toString());
             continue;
           }
           
-          if (!result.hasResponse()) continue;
+          if (result == null || !result.hasResponse()) continue;
           
           if (elapsedMs >= detectionThresholdMs) {
             logging().logToOutput("[MySQLTimeBased] FOUND! JSON param '" + name + "' field '" + jsonField + "' took " + elapsedMs + "ms");
@@ -434,7 +434,7 @@ source: |
         
         try {
           long startTime = System.currentTimeMillis();
-          result = api().http().sendRequest(mutatedRequest);
+          result = http.sendRequest(mutatedRequest);
           long endTime = System.currentTimeMillis();
           elapsedMs = endTime - startTime;
         } catch (Exception e) {
@@ -445,7 +445,7 @@ source: |
           continue;
         }
         
-        if (!result.hasResponse()) continue;
+        if (result == null || !result.hasResponse()) continue;
         
         if (elapsedMs >= detectionThresholdMs) {
           logging().logToOutput("[MySQLTimeBased] FOUND! Param '" + name + "' took " + elapsedMs + "ms");
