@@ -265,6 +265,23 @@ source: |+
             //httpEditor.requestPane().set(mutatedRequest.toByteArray());
             detectionFound = true;
             
+            // Find payload position in request for red marker highlighting
+            var reqString = mutatedRequest.toString();
+            var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
+            var payloadIndex = reqString.indexOf(payload);
+            var payloadLength = payload.length();
+            if (payloadIndex == -1) {
+              payloadIndex = reqString.indexOf(urlEncodedPayload);
+              payloadLength = urlEncodedPayload.length();
+            }
+            
+            var markedResult = result;
+            if (payloadIndex != -1) {
+              markedResult = result.withRequestMarkers(
+                Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
+              );
+            }
+            
             var detail = String.format("JSON parameter '%s', field '%s' was vulnerable to time-based SQL injection when payload '%s' was used (response took %dms).", name, jsonField, payload, endMs);
             api().siteMap().add(
               burp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue(
@@ -277,7 +294,7 @@ source: |+
                 "",
                 "",
                 burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
-                result
+                markedResult
               )
             );
           }
@@ -324,6 +341,22 @@ source: |+
           //httpEditor.requestPane().set(mutatedRequest.toByteArray());
           detectionFound = true;
           
+          // Find payload position in request for red marker highlighting
+          var reqString = mutatedRequest.toString();
+          var payloadIndex = reqString.indexOf(encodedPayload);
+          var payloadLength = encodedPayload.length();
+          if (payloadIndex == -1) {
+            payloadIndex = reqString.indexOf(payload);
+            payloadLength = payload.length();
+          }
+          
+          var markedResult = result;
+          if (payloadIndex != -1) {
+            markedResult = result.withRequestMarkers(
+              Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
+            );
+          }
+          
           var detail = String.format("Parameter '%s' was vulnerable to time-based SQL injection when payload '%s' was used (response took %dms).", name, payload, endMs);
           api().siteMap().add(
             burp.api.montoya.scanner.audit.issues.AuditIssue.auditIssue(
@@ -336,7 +369,7 @@ source: |+
               "",
               "",
               burp.api.montoya.scanner.audit.issues.AuditIssueSeverity.HIGH,
-              result
+              markedResult
             )
           );
         }
