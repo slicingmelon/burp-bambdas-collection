@@ -225,9 +225,19 @@ source: |
             var jsonField = jsonMutation.getKey();
             var mutatedJson = jsonMutation.getValue();
             
-            // Create new parameter with mutated JSON (pass raw, let Montoya handle encoding)
-            var newParam = HttpParameter.urlParameter(name, mutatedJson);
-            var mutatedRequest = baseRequest.withParameter(newParam);
+            // URL-encode the mutated JSON for proper URL formatting (like Repeater version)
+            var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
+            
+            // Replace the parameter value in the raw request to preserve encoding
+            var requestStr = new String(baseRequest.toByteArray().getBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            
+            // Find the original encoded parameter value in the URL and replace with new encoded value
+            var originalEncodedValue = api().utilities().urlUtils().encode(decodedValue);
+            var searchPattern = name + "=" + originalEncodedValue;
+            var replaceWith = name + "=" + encodedMutatedJson;
+            
+            var mutatedRequestStr = requestStr.replace(searchPattern, replaceWith);
+            var mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
             
             // Add cache buster if enabled
             if (bypassCache) {
