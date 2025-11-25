@@ -419,6 +419,8 @@ source: |+
   }
 
   if (!detectionFound) {
-    logging().logToOutput("[MySQLTimeBased] No findings.");
+    logging().logToOutput("[MySQLTimeBased] Completed. No findings.");
+  } else {
+    logging().logToOutput("[MySQLTimeBased] Completed. Check Issues dashboard for findings.");
   }
 
