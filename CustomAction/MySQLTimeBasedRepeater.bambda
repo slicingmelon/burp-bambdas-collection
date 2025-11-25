@@ -340,10 +340,18 @@ source: |+
           detectionFound = true;
           
           // Find payload position in request for red marker highlighting (using ByteArray for efficiency)
+          // Try multiple encoding variations since Burp may fully encode special chars
           var reqBytes = mutatedRequest.toByteArray();
           var payloadIndex = reqBytes.indexOf(encodedPayload);
           var payloadLength = encodedPayload.length();
           if (payloadIndex == -1) {
+            // Try fully URL-encoded version (for payloads with special chars like " ' , etc.)
+            var fullyEncodedPayload = api().utilities().urlUtils().encode(payload);
+            payloadIndex = reqBytes.indexOf(fullyEncodedPayload);
+            payloadLength = fullyEncodedPayload.length();
+          }
+          if (payloadIndex == -1) {
+            // Fallback to raw payload
             payloadIndex = reqBytes.indexOf(payload);
             payloadLength = payload.length();
           }
