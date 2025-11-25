@@ -518,28 +518,34 @@ source: |
             continue; // Skip if we can't validate
           }
           
+          long startMs = -1;
+          long endMs = -1;
+          
           try {
             // Use http.sendRequest() (scan context) so requests show in Logger
+            long startTime = System.currentTimeMillis();
             result = http.sendRequest(mutatedRequest);
+            long endTime = System.currentTimeMillis();
+            
+            // Try to use Burp's timing data API first (more accurate)
+            var timingOpt = result.timingData();
+            if (timingOpt.isPresent()) {
+              var timing = timingOpt.get();
+              java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+              java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
+              startMs = (tStart != null ? tStart.toMillis() : -1);
+              endMs = (tEnd != null ? tEnd.toMillis() : -1);
+            } else {
+              // Fallback to manual timing if timing data not available
+              startMs = endTime - startTime;
+              endMs = startMs;
+            }
           } catch (Throwable t) { // Catch all exceptions including RuntimeException
             // Silently skip - don't log to avoid spam, just continue
             continue;
           }
           
           if (result == null || !result.hasResponse()) continue;
-          
-          // Use Burp's timing data API (more accurate than manual timing)
-          var timingOpt = result.timingData();
-          if (timingOpt.isEmpty()) {
-            // Fallback to manual timing if timing data not available
-            continue;
-          }
-          
-          var timing = timingOpt.get();
-          java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
-          java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
-          long startMs = (tStart != null ? tStart.toMillis() : -1);
-          long endMs = (tEnd != null ? tEnd.toMillis() : -1);
           
           if (startMs >= detectionThresholdMs && startMs != -1) {
             logging().logToOutput("[MySQLTimeBased] FOUND! JSON param '" + name + "' field '" + jsonField + "' took " + startMs + "ms (start) / " + endMs + "ms (end)");
@@ -613,28 +619,34 @@ source: |
           continue; // Skip if we can't validate
         }
         
+        long startMs = -1;
+        long endMs = -1;
+        
         try {
           // Use http.sendRequest() (scan context) so requests show in Logger
+          long startTime = System.currentTimeMillis();
           result = http.sendRequest(mutatedRequest);
+          long endTime = System.currentTimeMillis();
+          
+          // Try to use Burp's timing data API first (more accurate)
+          var timingOpt = result.timingData();
+          if (timingOpt.isPresent()) {
+            var timing = timingOpt.get();
+            java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+            java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
+            startMs = (tStart != null ? tStart.toMillis() : -1);
+            endMs = (tEnd != null ? tEnd.toMillis() : -1);
+          } else {
+            // Fallback to manual timing if timing data not available
+            startMs = endTime - startTime;
+            endMs = startMs;
+          }
         } catch (Throwable t) { // Catch all exceptions including RuntimeException
           // Silently skip - don't log to avoid spam, just continue
           continue;
         }
         
         if (result == null || !result.hasResponse()) continue;
-        
-        // Use Burp's timing data API (more accurate than manual timing)
-        var timingOpt = result.timingData();
-        if (timingOpt.isEmpty()) {
-          // Fallback to manual timing if timing data not available
-          continue;
-        }
-        
-        var timing = timingOpt.get();
-        java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
-        java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
-        long startMs = (tStart != null ? tStart.toMillis() : -1);
-        long endMs = (tEnd != null ? tEnd.toMillis() : -1);
         
         if (startMs >= detectionThresholdMs && startMs != -1) {
           logging().logToOutput("[MySQLTimeBased] FOUND! Param '" + name + "' took " + startMs + "ms (start) / " + endMs + "ms (end)");
