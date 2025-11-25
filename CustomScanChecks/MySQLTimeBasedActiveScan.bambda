@@ -212,6 +212,23 @@ source: |
             var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
               name, jsonField, payload, startMs);
             
+            // Find payload position in request for red marker highlighting
+            var reqString = mutatedRequest.toString();
+            var encodedPayload = api().utilities().urlUtils().encode(payload);
+            var payloadIndex = reqString.indexOf(payload);
+            var payloadLength = payload.length();
+            if (payloadIndex == -1) {
+              payloadIndex = reqString.indexOf(encodedPayload);
+              payloadLength = encodedPayload.length();
+            }
+            
+            var markedResult = result;
+            if (payloadIndex != -1) {
+              markedResult = result.withRequestMarkers(
+                Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
+              );
+            }
+            
             issues.add(
               AuditIssue.auditIssue(
                 "MySQL Time-Based SQL Injection (JSON)",
@@ -223,7 +240,7 @@ source: |
                 "",
                 "",
                 AuditIssueSeverity.HIGH,
-                result
+                markedResult
               )
             );
           }
@@ -249,6 +266,23 @@ source: |
           var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
             name, payload, startMs);
           
+          // Find payload position in request for red marker highlighting
+          var reqString = mutatedRequest.toString();
+          var encodedPayload = api().utilities().urlUtils().encode(payload);
+          var payloadIndex = reqString.indexOf(payload);
+          var payloadLength = payload.length();
+          if (payloadIndex == -1) {
+            payloadIndex = reqString.indexOf(encodedPayload);
+            payloadLength = encodedPayload.length();
+          }
+          
+          var markedResult = result;
+          if (payloadIndex != -1) {
+            markedResult = result.withRequestMarkers(
+              Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
+            );
+          }
+          
           issues.add(
             AuditIssue.auditIssue(
               "MySQL Time-Based SQL Injection",
@@ -260,7 +294,7 @@ source: |
               "",
               "",
               AuditIssueSeverity.HIGH,
-              result
+              markedResult
             )
           );
         }
