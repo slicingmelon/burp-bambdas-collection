@@ -1,4 +1,4 @@
-id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+id: 7149855a-1105-4526-ab76-7a1d044badb5
 name: MySQL Time-Based Active Scan Alex
 function: SCAN_CHECK_ACTIVE_PER_INSERTION_POINT
 location: SCANNER
@@ -15,7 +15,7 @@ source: |
  **/
 
 // Configurable sleep time (in seconds)
-var DEFAULT_SLEEP_TIME = 5;
+var DEFAULT_SLEEP_TIME = 15;
 var SLEEP_PLACEHOLDER = "§§§SLEEP_TIME§§§";
 
 // Set to true to log expected errors during payload testing (network timeouts, etc.)
@@ -47,6 +47,10 @@ var payloads = payloadTemplates.stream()
 
 // Detection threshold based on sleep time (in milliseconds)
 var detectionThresholdMs = DEFAULT_SLEEP_TIME * 1000L;
+
+// Cache busting
+var bypassCache = true;
+var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
 
 // Custom URL encode - only encodes space, +, #, = (characters that break URL structure)
 var customUrlEncode = (java.util.function.Function<String, String>)(str -> {
@@ -478,19 +482,44 @@ for (var parameter : urlParameters) {
             .withAddedParameters(newParam);
           if (mutatedRequest == null) continue;
           
+          // Add cache buster if enabled
+          if (bypassCache) {
+            var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
+            mutatedRequest = mutatedRequest.withAddedParameters(
+              HttpParameter.urlParameter("_czb", cacheBuster)
+            );
+          }
+          
           // Send request and validate response
-          var result = http.sendRequest(mutatedRequest);
+          long startMs = -1;
+          long endMs = -1;
+          HttpRequestResponse result = null;
+          
+          try {
+            // Use manual timing as fallback
+            long startTime = System.currentTimeMillis();
+            result = http.sendRequest(mutatedRequest);
+            long endTime = System.currentTimeMillis();
+            
+            // Try to use Burp's timing data API first (more accurate)
+            var timingOpt = result.timingData();
+            if (timingOpt != null && timingOpt.isPresent()) {
+              var timing = timingOpt.get();
+              var tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+              var tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
+              startMs = (tStart != null) ? tStart.toMillis() : -1;
+              endMs = (tEnd != null) ? tEnd.toMillis() : -1;
+            } else {
+              // Fallback to manual timing if timing data not available
+              startMs = endTime - startTime;
+              endMs = startMs;
+            }
+          } catch (Throwable t) {
+            // Silently skip - don't log to avoid spam, just continue
+            continue;
+          }
+          
           if (result == null || !result.hasResponse()) continue;
-          
-          // Validate timing data
-          var timingOpt = result.timingData();
-          if (timingOpt == null || timingOpt.isEmpty()) continue;
-          
-          var timing = timingOpt.get();
-          if (timing == null) continue;
-          
-          var tStart = timing.timeBetweenRequestSentAndStartOfResponse();
-          var startMs = (tStart != null) ? tStart.toMillis() : -1;
           
           if (startMs >= detectionThresholdMs && startMs != -1) {
             logging().logToOutput(String.format(
@@ -560,21 +589,17 @@ for (var parameter : urlParameters) {
         // Validate payload
         if (payload == null || payload.isEmpty()) continue;
         
-        // Custom URL encode the payload (only space, +, #, =)
-        var encodedPayload = customUrlEncode.apply(payload);
-        if (encodedPayload == null) continue;
+        // URL-encode the payload to prevent breaking URL structure
+        var encodedPayload = api().utilities().urlUtils().encode(payload);
+        if (encodedPayload == null || encodedPayload.isEmpty()) continue;
         
         // Validate name and value
         if (name == null || name.isEmpty() || value == null) continue;
         
-        // Create new parameter with payload appended
-        // Note: we intentionally do NOT encode the whole value again here because
-        // HttpParameter.urlParameter() will encode it if it's raw characters.
-        // But if we pre-encoded it, Montoya might double-encode.
-        // The safest bet with Montoya is usually to pass raw strings if possible,
-        // OR pass the exact encoded string but use the replacement trick.
-        // Here we try passing the raw value+payload so Montoya encodes it correctly.
-        var newParam = HttpParameter.urlParameter(name, value + payload);
+        // Create new parameter with URL-encoded payload appended
+        // Append encoded payload to the original value
+        var newValue = value + encodedPayload;
+        var newParam = HttpParameter.urlParameter(name, newValue);
         if (newParam == null) continue;
         
         // Work around Montoya's query parser quirks by removing + re-adding the parameter
@@ -583,19 +608,44 @@ for (var parameter : urlParameters) {
           .withAddedParameters(newParam);
         if (mutatedRequest == null) continue;
         
+        // Add cache buster if enabled
+        if (bypassCache) {
+          var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
+          mutatedRequest = mutatedRequest.withAddedParameters(
+            HttpParameter.urlParameter("_czb", cacheBuster)
+          );
+        }
+        
         // Send request and validate response
-        var result = http.sendRequest(mutatedRequest);
+        long startMs = -1;
+        long endMs = -1;
+        HttpRequestResponse result = null;
+        
+        try {
+          // Use manual timing as fallback
+          long startTime = System.currentTimeMillis();
+          result = http.sendRequest(mutatedRequest);
+          long endTime = System.currentTimeMillis();
+          
+          // Try to use Burp's timing data API first (more accurate)
+          var timingOpt = result.timingData();
+          if (timingOpt != null && timingOpt.isPresent()) {
+            var timing = timingOpt.get();
+            var tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+            var tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
+            startMs = (tStart != null) ? tStart.toMillis() : -1;
+            endMs = (tEnd != null) ? tEnd.toMillis() : -1;
+          } else {
+            // Fallback to manual timing if timing data not available
+            startMs = endTime - startTime;
+            endMs = startMs;
+          }
+        } catch (Throwable t) {
+          // Silently skip - don't log to avoid spam, just continue
+          continue;
+        }
+        
         if (result == null || !result.hasResponse()) continue;
-        
-        // Validate timing data
-        var timingOpt = result.timingData();
-        if (timingOpt == null || timingOpt.isEmpty()) continue;
-        
-        var timing = timingOpt.get();
-        if (timing == null) continue;
-        
-        var tStart = timing.timeBetweenRequestSentAndStartOfResponse();
-        var startMs = (tStart != null) ? tStart.toMillis() : -1;
         
         if (startMs >= detectionThresholdMs && startMs != -1) {
           logging().logToOutput(String.format(
