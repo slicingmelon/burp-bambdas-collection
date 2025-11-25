@@ -199,25 +199,25 @@ source: |
     return AuditResult.auditResult();
   }
   
-  try {
-    // Iterate through each URL parameter
-    for (var parameter : urlParameters) {
-      String name = parameter.name();
-      String value = parameter.value();
+  // Iterate through each URL parameter
+  for (var parameter : urlParameters) {
+    String name = parameter.name();
+    String value = parameter.value();
+    
+    // URL decode the value to check if it's JSON
+    var decodedValue = api().utilities().urlUtils().decode(value);
+    
+    // Check if it's JSON
+    if (decodedValue != null && !decodedValue.isEmpty() && 
+        decodedValue.strip().startsWith("{") && decodedValue.strip().endsWith("}") &&
+        api().utilities().jsonUtils().isValidJson(decodedValue)) {
       
-      // URL decode the value to check if it's JSON
-      var decodedValue = api().utilities().urlUtils().decode(value);
-      
-      // Check if it's JSON
-      if (decodedValue != null && !decodedValue.isEmpty() && 
-          decodedValue.strip().startsWith("{") && decodedValue.strip().endsWith("}") &&
-          api().utilities().jsonUtils().isValidJson(decodedValue)) {
+      // Handle JSON parameter - inject into each JSON field
+      for (String payload : payloads) {
+        var jsonMutations = injectIntoJson.apply(decodedValue, payload);
         
-        // Handle JSON parameter - inject into each JSON field
-        for (String payload : payloads) {
-          var jsonMutations = injectIntoJson.apply(decodedValue, payload);
-          
-          for (var jsonMutation : jsonMutations) {
+        for (var jsonMutation : jsonMutations) {
+          try {
             var jsonField = jsonMutation.getKey();
             var mutatedJson = jsonMutation.getValue();
             
@@ -273,10 +273,15 @@ source: |
                 )
               );
             }
+          } catch (Exception e) {
+            // Log error but continue with next payload
+            logging().logToError("[MySQLTimeBased] Error on JSON payload, continuing: " + e.getMessage());
           }
         }
-      } else {
-        for (String payload : payloads) {
+      }
+    } else {
+      for (String payload : payloads) {
+        try {
           // Custom URL encode the payload (only space, +, #, =)
           var encodedPayload = customUrlEncode.apply(payload);
           
@@ -334,14 +339,12 @@ source: |
               )
             );
           }
+        } catch (Exception e) {
+          // Log error but continue with next payload
+          logging().logToError("[MySQLTimeBased] Error on payload, continuing: " + e.getMessage());
         }
       }
     }
-  } catch (Exception e) {
-    logging().logToError("[MySQLTimeBased] Exception: " + e.getClass().getName() + ": " + e.getMessage());
-    var sw = new java.io.StringWriter();
-    e.printStackTrace(new java.io.PrintWriter(sw));
-    logging().logToError("[MySQLTimeBased] Stack trace:\n" + sw.toString());
   }
   
   // Return all issues found (or empty if none)
