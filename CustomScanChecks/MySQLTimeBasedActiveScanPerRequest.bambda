@@ -237,6 +237,10 @@ source: |
             long startMs = (tStart != null ? tStart.toMillis() : -1);
             
             if (startMs >= detectionThresholdMs && startMs != -1) {
+              logging().logToOutput(String.format(
+                "[MySQLTimeBased] Detected delay %dms on JSON param '%s' field '%s' using payload '%s'",
+                startMs, name, jsonField, payload));
+              
               var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
                 name, jsonField, payload, startMs);
               
@@ -276,6 +280,7 @@ source: |
           } catch (Exception e) {
             // Log error but continue with next payload
             logging().logToError("[MySQLTimeBased] Error on JSON payload, continuing: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+            e.printStackTrace();
           }
         }
       }
@@ -300,6 +305,10 @@ source: |
           long startMs = (tStart != null ? tStart.toMillis() : -1);
           
           if (startMs >= detectionThresholdMs && startMs != -1) {
+            logging().logToOutput(String.format(
+              "[MySQLTimeBased] Detected delay %dms on param '%s' using payload '%s'",
+              startMs, name, payload));
+            
             var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
               name, payload, startMs);
             
@@ -344,6 +353,7 @@ source: |
         } catch (Exception e) {
           // Log error but continue with next payload
           logging().logToError("[MySQLTimeBased] Error on payload, continuing: " + e.getMessage());
+          e.printStackTrace();
         }
       }
     }
