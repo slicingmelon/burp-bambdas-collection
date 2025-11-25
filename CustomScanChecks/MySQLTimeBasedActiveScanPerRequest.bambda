@@ -12,9 +12,6 @@ source: |
   * @author slicingmelon
   **/
   
-  // Collect issues to return
-  var issues = new java.util.ArrayList<AuditIssue>();
-  
   // Debug: Log when bambda starts
   logging().logToOutput("[MySQLTimeBased] Starting scan check...");
   
@@ -359,9 +356,10 @@ source: |
             var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
               name, jsonField, payload, elapsedMs);
             
-            // Create the audit issue (use result without markers to avoid issues)
-            try {
-              var issue = AuditIssue.auditIssue(
+            // Create the audit issue and return immediately (like example bambdas)
+            // Continuing after a finding causes Burp internal crashes
+            return AuditResult.auditResult(
+              AuditIssue.auditIssue(
                 "MySQL Time-Based SQL Injection (JSON)",
                 detail,
                 "Use parameterized queries to prevent SQL injection.",
@@ -372,14 +370,8 @@ source: |
                 "",
                 AuditIssueSeverity.HIGH,
                 result
-              );
-              
-              // Add to issues list for return
-              issues.add(issue);
-              logging().logToOutput("[MySQLTimeBased] Issue added for JSON param '" + name + "' field '" + jsonField + "'");
-            } catch (Exception e) {
-              logging().logToError("[MySQLTimeBased] Error creating issue: " + e.getMessage());
-            }
+              )
+            );
           }
         }
       }
@@ -477,9 +469,10 @@ source: |
           var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
             name, payload, elapsedMs);
           
-          // Create the audit issue (use result without markers to avoid issues)
-          try {
-            var issue = AuditIssue.auditIssue(
+          // Create the audit issue and return immediately (like example bambdas)
+          // Continuing after a finding causes Burp internal crashes
+          return AuditResult.auditResult(
+            AuditIssue.auditIssue(
               "MySQL Time-Based SQL Injection",
               detail,
               "Use parameterized queries to prevent SQL injection.",
@@ -490,21 +483,12 @@ source: |
               "",
               AuditIssueSeverity.HIGH,
               result
-            );
-            
-            // Add to issues list for return
-            issues.add(issue);
-            logging().logToOutput("[MySQLTimeBased] Issue added for param '" + name + "'");
-          } catch (Exception e) {
-            logging().logToError("[MySQLTimeBased] Error creating issue (regular): " + e.getMessage());
-          }
+            )
+          );
         }
       }
     }
   }
   
-  // Return collected issues
-  if (!issues.isEmpty()) {
-    logging().logToOutput("[MySQLTimeBased] Returning " + issues.size() + " issue(s)");
-  }
-  return AuditResult.auditResult(issues);
+  // No issues found
+  return AuditResult.auditResult();
