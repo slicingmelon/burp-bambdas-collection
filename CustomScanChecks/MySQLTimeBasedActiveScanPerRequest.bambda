@@ -8,7 +8,7 @@ source: |
   * Iterates through ALL URL parameters directly (like the Repeater version).
   * Handles both regular parameters and JSON-encoded parameters in GET requests.
   * Tests empty JSON fields as both strings and arrays.
-  * Uses custom URL encoding for full control.
+  * Uses manual timing for accurate measurement in concurrent scans.
   * @author slicingmelon
   **/
   
@@ -180,9 +180,6 @@ source: |
     return results;
   });
   
-  // Burp calls this once per REQUEST (not per insertion point)
-  var issues = new java.util.ArrayList<AuditIssue>();
-  
   var baseRequest = requestResponse.request();
   if (baseRequest == null) return AuditResult.auditResult();
   
@@ -194,6 +191,8 @@ source: |
   if (urlParameters.isEmpty()) {
     return AuditResult.auditResult();
   }
+  
+  logging().logToOutput("[MySQLTimeBased] Starting scan with " + urlParameters.size() + " URL parameter(s)");
   
   // Iterate through each URL parameter
   for (var parameter : urlParameters) {
@@ -209,7 +208,7 @@ source: |
         api().utilities().jsonUtils().isValidJson(decodedValue)) {
       
       // Handle JSON parameter - inject into each JSON field
-      logging().logToOutput(String.format("[MySQLTimeBased] Detected JSON param '%s' with %d payloads to test", name, payloads.size()));
+      logging().logToOutput("[MySQLTimeBased] Detected JSON parameter: " + name);
       
       for (String payload : payloads) {
         var jsonMutations = injectIntoJson.apply(decodedValue, payload);
@@ -219,39 +218,25 @@ source: |
             var jsonField = jsonMutation.getKey();
             var mutatedJson = jsonMutation.getValue();
             
-            logging().logToOutput(String.format("[MySQLTimeBased] Testing JSON param '%s' field '%s'", name, jsonField));
+            // Create new parameter with mutated JSON (pass raw, let Montoya handle encoding)
+            var newParam = HttpParameter.urlParameter(name, mutatedJson);
+            var mutatedRequest = baseRequest.withParameter(newParam);
             
-            // URL-encode the mutated JSON for proper URL formatting
-            var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
-            
-            // Replace the parameter value in the raw request to preserve encoding
-            var requestStr = new String(baseRequest.toByteArray().getBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            
-            // Find the original encoded parameter value in the URL and replace with new encoded value
-            var originalEncodedValue = api().utilities().urlUtils().encode(decodedValue);
-            var searchPattern = name + "=" + originalEncodedValue;
-            var replaceWith = name + "=" + encodedMutatedJson;
-            
-            var mutatedRequestStr = requestStr.replace(searchPattern, replaceWith);
-            var mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
-            
+            // Manual timing for accurate measurement in concurrent scans
+            long startTime = System.currentTimeMillis();
             var result = http.sendRequest(mutatedRequest);
+            long endTime = System.currentTimeMillis();
+            long elapsedMs = endTime - startTime;
+            
             if (!result.hasResponse()) continue;
             
-            var timingOpt = result.timingData();
-            if (timingOpt.isEmpty()) continue;
-            
-            var timing = timingOpt.get();
-            java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
-            long startMs = (tStart != null ? tStart.toMillis() : -1);
-            
-            if (startMs >= detectionThresholdMs && startMs != -1) {
+            if (elapsedMs >= detectionThresholdMs) {
               logging().logToOutput(String.format(
-                "[MySQLTimeBased] Detected delay %dms on JSON param '%s' field '%s' using payload '%s'",
-                startMs, name, jsonField, payload));
+                "[MySQLTimeBased] SQL injection detected in JSON param %s, field: %s, payload: %s",
+                name, jsonField, payload));
               
               var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
-                name, jsonField, payload, startMs);
+                name, jsonField, payload, elapsedMs);
               
               var reqBytes = mutatedRequest.toByteArray();
               var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
@@ -282,56 +267,41 @@ source: |
                 markedResult
               );
               
-              // Report immediately to siteMap (survives crashes)
+              // Report immediately to siteMap
               api().siteMap().add(issue);
-              issues.add(issue);
             }
           } catch (Exception e) {
-            // Log error but continue with next payload
-            logging().logToError("[MySQLTimeBased] Error on JSON payload, continuing: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-            e.printStackTrace();
+            logging().logToError("[MySQLTimeBased] Error on JSON payload: " + e.getMessage());
           }
         }
       }
     } else {
+      // Handle regular parameter - inject directly
       for (String payload : payloads) {
         try {
           // Custom URL encode the payload (only space, +, #, =)
           var encodedPayload = customUrlEncode.apply(payload);
           
-          // Replace the parameter value in the raw request to ensure proper encoding
-          var requestStr = new String(baseRequest.toByteArray().getBytes(), java.nio.charset.StandardCharsets.UTF_8);
+          // Create new parameter with payload appended
+          var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
+          var mutatedRequest = baseRequest.withParameter(newParam);
           
-          // URL-encode name and value to find them in the raw request URL
-          var encodedName = api().utilities().urlUtils().encode(name);
-          var encodedValue = api().utilities().urlUtils().encode(value);
-          
-          // Find the original parameter in the URL and append encoded payload
-          var searchPattern = encodedName + "=" + encodedValue;
-          var replaceWith = encodedName + "=" + encodedValue + encodedPayload;
-          
-          var mutatedRequestStr = requestStr.replace(searchPattern, replaceWith);
-          var mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
-          
+          // Manual timing for accurate measurement in concurrent scans
+          long startTime = System.currentTimeMillis();
           var result = http.sendRequest(mutatedRequest);
+          long endTime = System.currentTimeMillis();
+          long elapsedMs = endTime - startTime;
+          
           if (!result.hasResponse()) continue;
           
-          var timingOpt = result.timingData();
-          if (timingOpt.isEmpty()) continue;
-          
-          var timing = timingOpt.get();
-          java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
-          long startMs = (tStart != null ? tStart.toMillis() : -1);
-          
-          if (startMs >= detectionThresholdMs && startMs != -1) {
+          if (elapsedMs >= detectionThresholdMs) {
             logging().logToOutput(String.format(
-              "[MySQLTimeBased] Detected delay %dms on param '%s' using payload '%s'",
-              startMs, name, payload));
+              "[MySQLTimeBased] SQL injection detected in param %s using payload: %s",
+              name, payload));
             
             var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
-              name, payload, startMs);
+              name, payload, elapsedMs);
             
-            // Find payload position in request for red marker highlighting (using ByteArray)
             var reqBytes = mutatedRequest.toByteArray();
             var payloadIndex = reqBytes.indexOf(encodedPayload);
             var payloadLength = encodedPayload.length();
@@ -365,18 +335,17 @@ source: |
               markedResult
             );
             
-            // Report immediately to siteMap (survives crashes)
+            // Report immediately to siteMap
             api().siteMap().add(issue);
-            issues.add(issue);
           }
         } catch (Exception e) {
-          // Log error but continue with next payload
-          logging().logToError("[MySQLTimeBased] Error on payload, continuing: " + e.getMessage());
-          e.printStackTrace();
+          logging().logToError("[MySQLTimeBased] Error on payload: " + e.getMessage());
         }
       }
     }
   }
   
-  // Return all issues found (or empty if none)
-  return AuditResult.auditResult(issues);
+  logging().logToOutput("[MySQLTimeBased] Scan completed");
+  
+  // Return empty - issues already reported to siteMap
+  return AuditResult.auditResult();
