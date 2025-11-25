@@ -14,7 +14,7 @@ source: |+
   **/
 
   // Configurable sleep time (in seconds)
-  var DEFAULT_SLEEP_TIME = 20;
+  var DEFAULT_SLEEP_TIME = 15;
   var SLEEP_PLACEHOLDER = "§§§SLEEP_TIME§§§";
   
   var payloadTemplates = java.util.List.of(
