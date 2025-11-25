@@ -7,6 +7,7 @@ source: |
   * Detects time-based MySQL SQL injection per insertion point.
   * Handles both regular parameters and JSON-encoded parameters in GET requests.
   * Tests empty JSON fields as both strings and arrays.
+  * Bypasses insertion point auto-encoding - uses custom URL encoding for full control.
   * @author slicingmelon
   **/
   
@@ -177,80 +178,36 @@ source: |
   var baseRequest = requestResponse.request();
   if (baseRequest == null) return AuditResult.auditResult();
   
-  // Get the insertion point's base value
+  // Get the insertion point's base value and name
   var baseValue = insertionPoint.baseValue();
   var name = insertionPoint.name();
   
+  // Only handle URL parameters - skip other insertion point types
+  var insertionPointType = insertionPoint.type();
+  if (insertionPointType != AuditInsertionPointType.URL_PARAMETER) {
+    return AuditResult.auditResult();
+  }
+  
   var decodedValue = api().utilities().urlUtils().decode(baseValue);
     
-    // Check if it's JSON
-    if (decodedValue != null && !decodedValue.isEmpty() && 
-        decodedValue.strip().startsWith("{") && decodedValue.strip().endsWith("}") &&
-        api().utilities().jsonUtils().isValidJson(decodedValue)) {
+  // Check if it's JSON
+  if (decodedValue != null && !decodedValue.isEmpty() && 
+      decodedValue.strip().startsWith("{") && decodedValue.strip().endsWith("}") &&
+      api().utilities().jsonUtils().isValidJson(decodedValue)) {
+    
+    for (String payload : payloads) {
+      var jsonMutations = injectIntoJson.apply(decodedValue, payload);
       
-      for (String payload : payloads) {
-        var jsonMutations = injectIntoJson.apply(decodedValue, payload);
+      for (var jsonMutation : jsonMutations) {
+        var jsonField = jsonMutation.getKey();
+        var mutatedJson = jsonMutation.getValue();
         
-        for (var jsonMutation : jsonMutations) {
-          var jsonField = jsonMutation.getKey();
-          var mutatedJson = jsonMutation.getValue();
-          
-          // Use insertionPoint to build request with mutated JSON
-          var mutatedRequest = insertionPoint.buildHttpRequestWithPayload(ByteArray.byteArray(mutatedJson));
-          
-          var result = http.sendRequest(mutatedRequest);
-          if (!result.hasResponse()) continue;
-          
-          var timingOpt = result.timingData();
-          if (timingOpt.isEmpty()) continue;
-          
-          var timing = timingOpt.get();
-          java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
-          long startMs = (tStart != null ? tStart.toMillis() : -1);
-          
-          if (startMs >= detectionThresholdMs && startMs != -1) {
-            var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
-              name, jsonField, payload, startMs);
-            
-            // Find payload position in request for red marker highlighting
-            var reqString = mutatedRequest.toString();
-            var encodedPayload = api().utilities().urlUtils().encode(payload);
-            var payloadIndex = reqString.indexOf(payload);
-            var payloadLength = payload.length();
-            if (payloadIndex == -1) {
-              payloadIndex = reqString.indexOf(encodedPayload);
-              payloadLength = encodedPayload.length();
-            }
-            
-            var markedResult = result;
-            if (payloadIndex != -1) {
-              markedResult = result.withRequestMarkers(
-                Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
-              );
-            }
-            
-            issues.add(
-              AuditIssue.auditIssue(
-                "MySQL Time-Based SQL Injection (JSON)",
-                detail,
-                "Use parameterized queries",
-                mutatedRequest.url(),
-                AuditIssueSeverity.HIGH,
-                AuditIssueConfidence.CERTAIN,
-                "",
-                "",
-                AuditIssueSeverity.HIGH,
-                markedResult
-              )
-            );
-          }
-        }
-      }
-    } else {
-      // Handle regular parameter
-      for (String payload : payloads) {
-        // Don't encode - insertionPoint handles encoding per API spec
-        var mutatedRequest = insertionPoint.buildHttpRequestWithPayload(ByteArray.byteArray(baseValue + payload));
+        // URL encode the mutated JSON (standard encoding for JSON)
+        var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
+        
+        // Bypass insertionPoint - use withParameter for full control over encoding
+        var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
+        var mutatedRequest = baseRequest.withParameter(newParam);
         
         var result = http.sendRequest(mutatedRequest);
         if (!result.hasResponse()) continue;
@@ -263,17 +220,17 @@ source: |
         long startMs = (tStart != null ? tStart.toMillis() : -1);
         
         if (startMs >= detectionThresholdMs && startMs != -1) {
-          var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
-            name, payload, startMs);
+          var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
+            name, jsonField, payload, startMs);
           
-          // Find payload position in request for red marker highlighting
-          var reqString = mutatedRequest.toString();
-          var encodedPayload = api().utilities().urlUtils().encode(payload);
-          var payloadIndex = reqString.indexOf(payload);
+          // Find payload position in request for red marker highlighting (using ByteArray)
+          var reqBytes = mutatedRequest.toByteArray();
+          var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
+          var payloadIndex = reqBytes.indexOf(payload);
           var payloadLength = payload.length();
           if (payloadIndex == -1) {
-            payloadIndex = reqString.indexOf(encodedPayload);
-            payloadLength = encodedPayload.length();
+            payloadIndex = reqBytes.indexOf(urlEncodedPayload);
+            payloadLength = urlEncodedPayload.length();
           }
           
           var markedResult = result;
@@ -285,7 +242,7 @@ source: |
           
           issues.add(
             AuditIssue.auditIssue(
-              "MySQL Time-Based SQL Injection",
+              "MySQL Time-Based SQL Injection (JSON)",
               detail,
               "Use parameterized queries",
               mutatedRequest.url(),
@@ -300,6 +257,68 @@ source: |
         }
       }
     }
+  } else {
+    // Handle regular parameter
+    for (String payload : payloads) {
+      // Custom URL encode the payload (only space, +, #, =) - YOU control the encoding!
+      var encodedPayload = customUrlEncode.apply(payload);
+      
+      // Bypass insertionPoint - use withParameter for full control over encoding
+      var newParam = HttpParameter.urlParameter(name, baseValue + encodedPayload);
+      var mutatedRequest = baseRequest.withParameter(newParam);
+      
+      var result = http.sendRequest(mutatedRequest);
+      if (!result.hasResponse()) continue;
+      
+      var timingOpt = result.timingData();
+      if (timingOpt.isEmpty()) continue;
+      
+      var timing = timingOpt.get();
+      java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+      long startMs = (tStart != null ? tStart.toMillis() : -1);
+      
+      if (startMs >= detectionThresholdMs && startMs != -1) {
+        var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
+          name, payload, startMs);
+        
+        // Find payload position in request for red marker highlighting (using ByteArray)
+        var reqBytes = mutatedRequest.toByteArray();
+        var payloadIndex = reqBytes.indexOf(encodedPayload);
+        var payloadLength = encodedPayload.length();
+        if (payloadIndex == -1) {
+          var fullyEncodedPayload = api().utilities().urlUtils().encode(payload);
+          payloadIndex = reqBytes.indexOf(fullyEncodedPayload);
+          payloadLength = fullyEncodedPayload.length();
+        }
+        if (payloadIndex == -1) {
+          payloadIndex = reqBytes.indexOf(payload);
+          payloadLength = payload.length();
+        }
+        
+        var markedResult = result;
+        if (payloadIndex != -1) {
+          markedResult = result.withRequestMarkers(
+            Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
+          );
+        }
+        
+        issues.add(
+          AuditIssue.auditIssue(
+            "MySQL Time-Based SQL Injection",
+            detail,
+            "Use parameterized queries",
+            mutatedRequest.url(),
+            AuditIssueSeverity.HIGH,
+            AuditIssueConfidence.CERTAIN,
+            "",
+            "",
+            AuditIssueSeverity.HIGH,
+            markedResult
+          )
+        );
+      }
+    }
+  }
   
   // Return all issues found (or empty if none)
   if (issues.isEmpty()) {
