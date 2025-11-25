@@ -491,7 +491,6 @@ source: |
           // Use withParameter instead of string manipulation for more reliable request building
           HttpRequestResponse result;
           HttpRequest mutatedRequest;
-          long elapsedMs;
           try {
             // Build request using withParameter (more reliable than string replacement)
             var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
@@ -520,10 +519,8 @@ source: |
           }
           
           try {
-            long startTime = System.currentTimeMillis();
+            // Use http.sendRequest() (scan context) so requests show in Logger
             result = http.sendRequest(mutatedRequest);
-            long endTime = System.currentTimeMillis();
-            elapsedMs = endTime - startTime;
           } catch (Throwable t) { // Catch all exceptions including RuntimeException
             // Silently skip - don't log to avoid spam, just continue
             continue;
@@ -531,11 +528,24 @@ source: |
           
           if (result == null || !result.hasResponse()) continue;
           
-          if (elapsedMs >= detectionThresholdMs) {
-            logging().logToOutput("[MySQLTimeBased] FOUND! JSON param '" + name + "' field '" + jsonField + "' took " + elapsedMs + "ms");
+          // Use Burp's timing data API (more accurate than manual timing)
+          var timingOpt = result.timingData();
+          if (timingOpt.isEmpty()) {
+            // Fallback to manual timing if timing data not available
+            continue;
+          }
+          
+          var timing = timingOpt.get();
+          java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+          java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
+          long startMs = (tStart != null ? tStart.toMillis() : -1);
+          long endMs = (tEnd != null ? tEnd.toMillis() : -1);
+          
+          if (startMs >= detectionThresholdMs && startMs != -1) {
+            logging().logToOutput("[MySQLTimeBased] FOUND! JSON param '" + name + "' field '" + jsonField + "' took " + startMs + "ms (start) / " + endMs + "ms (end)");
             
             var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
-              name, jsonField, payload, elapsedMs);
+              name, jsonField, payload, endMs);
             
             // Create the audit issue and return immediately (like example bambdas)
             // Continuing after a finding causes Burp internal crashes
@@ -575,7 +585,6 @@ source: |
         // Use withParameter instead of string manipulation for more reliable request building
         HttpRequestResponse result;
         HttpRequest mutatedRequest;
-        long elapsedMs;
         try {
           // Build request using withParameter (more reliable than string replacement)
           var newValue = value + encodedPayload;
@@ -605,10 +614,8 @@ source: |
         }
         
         try {
-          long startTime = System.currentTimeMillis();
+          // Use http.sendRequest() (scan context) so requests show in Logger
           result = http.sendRequest(mutatedRequest);
-          long endTime = System.currentTimeMillis();
-          elapsedMs = endTime - startTime;
         } catch (Throwable t) { // Catch all exceptions including RuntimeException
           // Silently skip - don't log to avoid spam, just continue
           continue;
@@ -616,11 +623,24 @@ source: |
         
         if (result == null || !result.hasResponse()) continue;
         
-        if (elapsedMs >= detectionThresholdMs) {
-          logging().logToOutput("[MySQLTimeBased] FOUND! Param '" + name + "' took " + elapsedMs + "ms");
+        // Use Burp's timing data API (more accurate than manual timing)
+        var timingOpt = result.timingData();
+        if (timingOpt.isEmpty()) {
+          // Fallback to manual timing if timing data not available
+          continue;
+        }
+        
+        var timing = timingOpt.get();
+        java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+        java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
+        long startMs = (tStart != null ? tStart.toMillis() : -1);
+        long endMs = (tEnd != null ? tEnd.toMillis() : -1);
+        
+        if (startMs >= detectionThresholdMs && startMs != -1) {
+          logging().logToOutput("[MySQLTimeBased] FOUND! Param '" + name + "' took " + startMs + "ms (start) / " + endMs + "ms (end)");
           
           var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
-            name, payload, elapsedMs);
+            name, payload, endMs);
           
           // Create the audit issue and return immediately (like example bambdas)
           // Continuing after a finding causes Burp internal crashes
