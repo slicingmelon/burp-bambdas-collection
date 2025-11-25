@@ -730,19 +730,21 @@ source: |
   // Retrieve issues from sitemap to return (avoids storing large HttpRequestResponse objects in memory)
   var issues = new java.util.ArrayList<AuditIssue>();
   try {
-    for (var urlStr : issueUrls) {
-      try {
-        var url = api().utilities().urlUtils().url(urlStr);
-        if (url == null) continue;
-        
-        // Get all issues for this URL from sitemap
-        var urlIssues = api().siteMap().issuesForUrl(url);
-        if (urlIssues != null && !urlIssues.isEmpty()) {
-          issues.addAll(urlIssues);
+    if (!issueUrls.isEmpty()) {
+      // Get all issues from sitemap and filter by our tracked URLs
+      var allIssues = api().siteMap().issues();
+      if (allIssues != null && !allIssues.isEmpty()) {
+        for (var issue : allIssues) {
+          try {
+            var issueBaseUrl = issue.baseUrl();
+            if (issueBaseUrl != null && issueUrls.contains(issueBaseUrl)) {
+              issues.add(issue);
+            }
+          } catch (Throwable e) {
+            // Skip this issue if we can't check its URL
+            continue;
+          }
         }
-      } catch (Throwable e) {
-        // Skip if we can't retrieve issues for this URL
-        continue;
       }
     }
   } catch (Throwable e) {
