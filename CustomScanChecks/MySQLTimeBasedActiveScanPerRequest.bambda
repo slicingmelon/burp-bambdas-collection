@@ -221,11 +221,19 @@ source: |
             
             logging().logToOutput(String.format("[MySQLTimeBased] Testing JSON param '%s' field '%s'", name, jsonField));
             
-            // Pass raw JSON - let Montoya handle encoding (avoid double-encoding)
-            var newParam = HttpParameter.urlParameter(name, mutatedJson);
-
-            // Use withParameter to replace in-place (same as Repeater version)
-            var mutatedRequest = baseRequest.withParameter(newParam);
+            // URL-encode the mutated JSON for proper URL formatting
+            var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
+            
+            // Replace the parameter value in the raw request to preserve encoding
+            var requestStr = new String(baseRequest.toByteArray().getBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            
+            // Find the original encoded parameter value in the URL and replace with new encoded value
+            var originalEncodedValue = api().utilities().urlUtils().encode(decodedValue);
+            var searchPattern = name + "=" + originalEncodedValue;
+            var replaceWith = name + "=" + encodedMutatedJson;
+            
+            var mutatedRequestStr = requestStr.replace(searchPattern, replaceWith);
+            var mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
             
             var result = http.sendRequest(mutatedRequest);
             if (!result.hasResponse()) continue;
