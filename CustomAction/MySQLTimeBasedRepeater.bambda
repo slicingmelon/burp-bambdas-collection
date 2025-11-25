@@ -274,9 +274,10 @@ source: |+
           
           logging().logToOutput(String.format("[MySQLTimeBased] Testing JSON field '%s'", jsonField));
           
-          // Use Burp's withParameter() to properly replace the parameter value
-          // Pass raw JSON - Burp will handle URL encoding automatically
-          var newParam = HttpParameter.urlParameter(name, mutatedJson);
+          // URL-encode the mutated JSON before passing to withParameter
+          // (Burp doesn't auto-encode parameter values)
+          var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
+          var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
           var mutatedRequest = baseRequest.withParameter(newParam);
           
           // Add cache buster if enabled
