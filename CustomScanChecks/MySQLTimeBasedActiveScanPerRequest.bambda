@@ -189,7 +189,6 @@ source: |
     return AuditResult.auditResult();
   }
   
-  // Wrap main logic in try-catch to handle any Burp internal exceptions gracefully
   try {
     // Iterate through each URL parameter
     for (var parameter : urlParameters) {
@@ -233,7 +232,6 @@ source: |
               var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
                 name, jsonField, payload, startMs);
               
-              // Find payload position in request for red marker highlighting (using ByteArray)
               var reqBytes = mutatedRequest.toByteArray();
               var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
               var payloadIndex = reqBytes.indexOf(payload);
@@ -268,9 +266,8 @@ source: |
           }
         }
       } else {
-        // Handle regular parameter - inject directly
         for (String payload : payloads) {
-          // Custom URL encode the payload (only space, +, #, =) - YOU control the encoding!
+          // Custom URL encode the payload (only space, +, #, =)
           var encodedPayload = customUrlEncode.apply(payload);
           
           // Create new parameter with payload appended
@@ -331,12 +328,10 @@ source: |
       }
     }
   } catch (Exception e) {
-    // Log any Burp internal exceptions (like burp.Zn0n) for debugging
     logging().logToError("[MySQLTimeBased] Exception: " + e.getClass().getName() + ": " + e.getMessage());
     var sw = new java.io.StringWriter();
     e.printStackTrace(new java.io.PrintWriter(sw));
     logging().logToError("[MySQLTimeBased] Stack trace:\n" + sw.toString());
-    // Return whatever issues we've collected so far
   }
   
   // Return all issues found (or empty if none)
