@@ -552,8 +552,8 @@ source: |
                 
                 logging().logToOutput("[DEBUG] Step 2: Issue created, adding to site map");
                 
-                // Add the request/response to siteMap (not the issue - siteMap.add takes HttpRequestResponse)
-                api().siteMap().add(result);
+                // Add the issue to siteMap (siteMap.add takes AuditIssue)
+                api().siteMap().add(issue);
                 
                 logging().logToOutput("[DEBUG] Step 3: Adding to issues list");
                 issues.add(issue);
@@ -678,8 +678,8 @@ source: |
               
               logging().logToOutput("[DEBUG] Step 2: Issue created, adding to site map");
               
-              // Add the request/response to siteMap (not the issue - siteMap.add takes HttpRequestResponse)
-              api().siteMap().add(result);
+              // Add the issue to siteMap (siteMap.add takes AuditIssue)
+              api().siteMap().add(issue);
               
               logging().logToOutput("[DEBUG] Step 3: Adding to issues list");
               issues.add(issue);
