@@ -217,9 +217,14 @@ source: |
             var jsonField = jsonMutation.getKey();
             var mutatedJson = jsonMutation.getValue();
             
-            // Create new parameter with raw mutated JSON (Montoya handles encoding internally)
-            var newParam = HttpParameter.urlParameter(name, mutatedJson);
-            var mutatedRequest = baseRequest.withParameter(newParam);
+            // Encode mutated JSON once to keep URLs well-formed
+            var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
+            var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
+
+            // Work around Montoya's query parser quirks by removing + re-adding the parameter
+            var mutatedRequest = baseRequest
+              .withRemovedParameters(parameter)
+              .withAddedParameters(newParam);
             
             var result = http.sendRequest(mutatedRequest);
             if (!result.hasResponse()) continue;
