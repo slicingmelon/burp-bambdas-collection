@@ -49,6 +49,10 @@ source: |
   // Detection threshold based on sleep time (in milliseconds)
   var detectionThresholdMs = DEFAULT_SLEEP_TIME * 1000L;
   
+  // Cache busting
+  var bypassCache = true;
+  var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  
   // Custom URL encode - only encodes space, +, #, = (characters that break URL structure)
   var customUrlEncode = (java.util.function.Function<String, String>)(str -> {
     return str.replace(" ", "%20")
@@ -225,6 +229,14 @@ source: |
             var newParam = HttpParameter.urlParameter(name, mutatedJson);
             var mutatedRequest = baseRequest.withParameter(newParam);
             
+            // Add cache buster if enabled
+            if (bypassCache) {
+              var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
+              mutatedRequest = mutatedRequest.withAddedParameters(
+                HttpParameter.urlParameter("_czb", cacheBuster)
+              );
+            }
+            
             // Manual timing for accurate measurement in concurrent scans
             long startTime = System.currentTimeMillis();
             var result = http.sendRequest(mutatedRequest);
@@ -285,6 +297,14 @@ source: |
           // Create new parameter with payload appended
           var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
           var mutatedRequest = baseRequest.withParameter(newParam);
+          
+          // Add cache buster if enabled
+          if (bypassCache) {
+            var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
+            mutatedRequest = mutatedRequest.withAddedParameters(
+              HttpParameter.urlParameter("_czb", cacheBuster)
+            );
+          }
           
           // Manual timing for accurate measurement in concurrent scans
           long startTime = System.currentTimeMillis();
