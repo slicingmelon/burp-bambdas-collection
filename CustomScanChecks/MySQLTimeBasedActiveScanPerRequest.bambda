@@ -15,6 +15,17 @@ source: |
   // Collect issues to return
   var issues = new java.util.ArrayList<AuditIssue>();
   
+  // Debug: Log when bambda starts
+  logging().logToOutput("[MySQLTimeBased] Starting scan check...");
+  
+  // Check if we have a valid request
+  if (requestResponse == null || requestResponse.request() == null) {
+    logging().logToError("[MySQLTimeBased] No request available");
+    return AuditResult.auditResult();
+  }
+  
+  logging().logToOutput("[MySQLTimeBased] Request URL: " + requestResponse.request().url());
+  
   // Configurable sleep time (in seconds)
   var DEFAULT_SLEEP_TIME = 15;
   var SLEEP_PLACEHOLDER = "§§§SLEEP_TIME§§§";
@@ -57,16 +68,23 @@ source: |
               .replace("=", "%3D");
   });
   
-  // Helper function to minify JSON (remove pretty-print formatting from toJsonString())
+  // Helper function to minify JSON (smarter - respects string boundaries)
   var minifyJson = (java.util.function.Function<String, String>)(jsonStr -> {
-    return jsonStr.replace("\n", "")
-                  .replace("\r", "")
-                  .replaceAll("\\{\\s+", "{")
-                  .replaceAll("\\[\\s+", "[")
-                  .replaceAll("\\s+\\}", "}")
-                  .replaceAll("\\s+\\]", "]")
-                  .replaceAll(",\\s+", ",")
-                  .replaceAll(":\\s+", ":");
+    var sb = new StringBuilder();
+    boolean inString = false;
+    for (int i = 0; i < jsonStr.length(); i++) {
+      char c = jsonStr.charAt(i);
+      if (c == '"' && (i == 0 || jsonStr.charAt(i - 1) != '\\')) {
+        inString = !inString;
+        sb.append(c);
+        continue;
+      }
+      if (!inString && Character.isWhitespace(c)) {
+        continue; // strip whitespace only outside strings
+      }
+      sb.append(c);
+    }
+    return sb.toString();
   });
   
   // Helper function to inject payload into a JSON string
@@ -188,14 +206,20 @@ source: |
   });
   
   var baseRequest = requestResponse.request();
-  if (baseRequest == null) return AuditResult.auditResult();
+  if (baseRequest == null) {
+    logging().logToError("[MySQLTimeBased] baseRequest is null");
+    return AuditResult.auditResult();
+  }
   
   // Get ALL URL parameters directly (like the Repeater version)
   var urlParameters = baseRequest.parameters().stream()
     .filter(p -> p.type() == HttpParameterType.URL)
     .toList();
   
+  logging().logToOutput("[MySQLTimeBased] Found " + urlParameters.size() + " URL parameters");
+  
   if (urlParameters.isEmpty()) {
+    logging().logToOutput("[MySQLTimeBased] No URL parameters to test");
     return AuditResult.auditResult();
   }
   
