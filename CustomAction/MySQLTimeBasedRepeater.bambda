@@ -9,6 +9,7 @@ source: |+
   * so you can watch for slow responses in Logger or the console.
   * Also reports the findings to the Issues dashboard.
   * Handles both regular parameters and JSON-encoded parameters.
+  * If text is selected in Repeater, only tests the matching parameter.
   * @author slicingmelon
   **/
 
@@ -193,13 +194,56 @@ source: |+
   if (baseRequest == null) return;
 
   // Get all URL parameters (order preserved by Montoya API)
-  var urlParameters = baseRequest.parameters().stream()
+  var allUrlParameters = baseRequest.parameters().stream()
     .filter(p -> p.type() == HttpParameterType.URL)
     .toList();
 
-  if (urlParameters.isEmpty()) {
+  if (allUrlParameters.isEmpty()) {
     logging().logToOutput("[MySQLTimeBased] No URL parameters found.");
     return;
+  }
+
+  // Check if user has selected text in the request - if so, only test that parameter
+  String selectedText = null;
+  if (selection.hasRequestSelection()) {
+    selectedText = selection.requestSelection().contents().toString().strip();
+    logging().logToOutput("[MySQLTimeBased] Selection detected: " + selectedText);
+  }
+
+  // Filter parameters based on selection (if any)
+  java.util.List<HttpParameter> urlParameters;
+  if (selectedText != null && !selectedText.isEmpty()) {
+    var finalSelectedText = selectedText;
+    // Try to match: param name, param value, or full "name=value" format
+    urlParameters = allUrlParameters.stream()
+      .filter(p -> {
+        String paramName = p.name();
+        String paramValue = p.value();
+        String decodedValue = api().utilities().urlUtils().decode(paramValue);
+        String fullParam = paramName + "=" + paramValue;
+        String fullParamDecoded = paramName + "=" + decodedValue;
+        
+        // Check if selection matches name, value, decoded value, or full param
+        return paramName.equals(finalSelectedText) ||
+               paramValue.equals(finalSelectedText) ||
+               decodedValue.equals(finalSelectedText) ||
+               fullParam.equals(finalSelectedText) ||
+               fullParamDecoded.equals(finalSelectedText) ||
+               finalSelectedText.contains(paramName + "=") ||
+               finalSelectedText.startsWith(paramName + "=");
+      })
+      .toList();
+    
+    if (urlParameters.isEmpty()) {
+      logging().logToOutput("[MySQLTimeBased] Selection doesn't match any URL parameter. Testing all parameters...");
+      urlParameters = allUrlParameters;
+    } else {
+      logging().logToOutput("[MySQLTimeBased] Testing only selected parameter(s): " + 
+        urlParameters.stream().map(HttpParameter::name).collect(java.util.stream.Collectors.joining(", ")));
+    }
+  } else {
+    urlParameters = allUrlParameters;
+    logging().logToOutput("[MySQLTimeBased] No selection - testing all " + urlParameters.size() + " parameter(s).");
   }
 
   var alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -261,11 +305,8 @@ source: |+
           
           if (startMs >= detectionThresholdMs && startMs != -1) {
             logging().logToOutput("[MySQLTimeBased] SQL injection detected in JSON param " + name + ", field: " + jsonField + ", payload: " + payload);
-            //httpEditor.responsePane().set(result.response().toByteArray());
-            //httpEditor.requestPane().set(mutatedRequest.toByteArray());
             detectionFound = true;
             
-            // Find payload position in request for red marker highlighting (using ByteArray for efficiency)
             var reqBytes = mutatedRequest.toByteArray();
             var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
             var payloadIndex = reqBytes.indexOf(payload);
@@ -306,7 +347,6 @@ source: |+
         // Custom URL encode the payload (only space, +, #, =)
         var encodedPayload = customUrlEncode.apply(payload);
         
-        // Create new parameter with payload appended
         var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
         
         // Update parameter in place (order preserved!)
@@ -339,19 +379,15 @@ source: |+
           logging().logToOutput("[MySQLTimeBased] SQL injection detected in param " + name + " using payload: " + payload);
           detectionFound = true;
           
-          // Find payload position in request for red marker highlighting (using ByteArray for efficiency)
-          // Try multiple encoding variations since Burp may fully encode special chars
           var reqBytes = mutatedRequest.toByteArray();
           var payloadIndex = reqBytes.indexOf(encodedPayload);
           var payloadLength = encodedPayload.length();
           if (payloadIndex == -1) {
-            // Try fully URL-encoded version (for payloads with special chars like " ' , etc.)
             var fullyEncodedPayload = api().utilities().urlUtils().encode(payload);
             payloadIndex = reqBytes.indexOf(fullyEncodedPayload);
             payloadLength = fullyEncodedPayload.length();
           }
           if (payloadIndex == -1) {
-            // Fallback to raw payload
             payloadIndex = reqBytes.indexOf(payload);
             payloadLength = payload.length();
           }
