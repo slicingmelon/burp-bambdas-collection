@@ -189,32 +189,92 @@ source: |
     return AuditResult.auditResult();
   }
   
-  // Iterate through each URL parameter
-  for (var parameter : urlParameters) {
-    String name = parameter.name();
-    String value = parameter.value();
-    
-    // URL decode the value to check if it's JSON
-    var decodedValue = api().utilities().urlUtils().decode(value);
-    
-    // Check if it's JSON
-    if (decodedValue != null && !decodedValue.isEmpty() && 
-        decodedValue.strip().startsWith("{") && decodedValue.strip().endsWith("}") &&
-        api().utilities().jsonUtils().isValidJson(decodedValue)) {
+  // Wrap main logic in try-catch to handle any Burp internal exceptions gracefully
+  try {
+    // Iterate through each URL parameter
+    for (var parameter : urlParameters) {
+      String name = parameter.name();
+      String value = parameter.value();
       
-      // Handle JSON parameter - inject into each JSON field
-      for (String payload : payloads) {
-        var jsonMutations = injectIntoJson.apply(decodedValue, payload);
+      // URL decode the value to check if it's JSON
+      var decodedValue = api().utilities().urlUtils().decode(value);
+      
+      // Check if it's JSON
+      if (decodedValue != null && !decodedValue.isEmpty() && 
+          decodedValue.strip().startsWith("{") && decodedValue.strip().endsWith("}") &&
+          api().utilities().jsonUtils().isValidJson(decodedValue)) {
         
-        for (var jsonMutation : jsonMutations) {
-          var jsonField = jsonMutation.getKey();
-          var mutatedJson = jsonMutation.getValue();
+        // Handle JSON parameter - inject into each JSON field
+        for (String payload : payloads) {
+          var jsonMutations = injectIntoJson.apply(decodedValue, payload);
           
-          // URL encode the mutated JSON (standard encoding for JSON)
-          var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
+          for (var jsonMutation : jsonMutations) {
+            var jsonField = jsonMutation.getKey();
+            var mutatedJson = jsonMutation.getValue();
+            
+            // URL encode the mutated JSON (standard encoding for JSON)
+            var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
+            
+            // Create new parameter with mutated JSON
+            var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
+            var mutatedRequest = baseRequest.withParameter(newParam);
+            
+            var result = http.sendRequest(mutatedRequest);
+            if (!result.hasResponse()) continue;
+            
+            var timingOpt = result.timingData();
+            if (timingOpt.isEmpty()) continue;
+            
+            var timing = timingOpt.get();
+            java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+            long startMs = (tStart != null ? tStart.toMillis() : -1);
+            
+            if (startMs >= detectionThresholdMs && startMs != -1) {
+              var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
+                name, jsonField, payload, startMs);
+              
+              // Find payload position in request for red marker highlighting (using ByteArray)
+              var reqBytes = mutatedRequest.toByteArray();
+              var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
+              var payloadIndex = reqBytes.indexOf(payload);
+              var payloadLength = payload.length();
+              if (payloadIndex == -1) {
+                payloadIndex = reqBytes.indexOf(urlEncodedPayload);
+                payloadLength = urlEncodedPayload.length();
+              }
+              
+              var markedResult = result;
+              if (payloadIndex != -1) {
+                markedResult = result.withRequestMarkers(
+                  Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
+                );
+              }
+              
+              issues.add(
+                AuditIssue.auditIssue(
+                  "MySQL Time-Based SQL Injection (JSON)",
+                  detail,
+                  "Use parameterized queries",
+                  mutatedRequest.url(),
+                  AuditIssueSeverity.HIGH,
+                  AuditIssueConfidence.CERTAIN,
+                  "",
+                  "",
+                  AuditIssueSeverity.HIGH,
+                  markedResult
+                )
+              );
+            }
+          }
+        }
+      } else {
+        // Handle regular parameter - inject directly
+        for (String payload : payloads) {
+          // Custom URL encode the payload (only space, +, #, =) - YOU control the encoding!
+          var encodedPayload = customUrlEncode.apply(payload);
           
-          // Create new parameter with mutated JSON
-          var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
+          // Create new parameter with payload appended
+          var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
           var mutatedRequest = baseRequest.withParameter(newParam);
           
           var result = http.sendRequest(mutatedRequest);
@@ -228,17 +288,21 @@ source: |
           long startMs = (tStart != null ? tStart.toMillis() : -1);
           
           if (startMs >= detectionThresholdMs && startMs != -1) {
-            var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
-              name, jsonField, payload, startMs);
+            var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
+              name, payload, startMs);
             
             // Find payload position in request for red marker highlighting (using ByteArray)
             var reqBytes = mutatedRequest.toByteArray();
-            var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
-            var payloadIndex = reqBytes.indexOf(payload);
-            var payloadLength = payload.length();
+            var payloadIndex = reqBytes.indexOf(encodedPayload);
+            var payloadLength = encodedPayload.length();
             if (payloadIndex == -1) {
-              payloadIndex = reqBytes.indexOf(urlEncodedPayload);
-              payloadLength = urlEncodedPayload.length();
+              var fullyEncodedPayload = api().utilities().urlUtils().encode(payload);
+              payloadIndex = reqBytes.indexOf(fullyEncodedPayload);
+              payloadLength = fullyEncodedPayload.length();
+            }
+            if (payloadIndex == -1) {
+              payloadIndex = reqBytes.indexOf(payload);
+              payloadLength = payload.length();
             }
             
             var markedResult = result;
@@ -250,7 +314,7 @@ source: |
             
             issues.add(
               AuditIssue.auditIssue(
-                "MySQL Time-Based SQL Injection (JSON)",
+                "MySQL Time-Based SQL Injection",
                 detail,
                 "Use parameterized queries",
                 mutatedRequest.url(),
@@ -265,68 +329,14 @@ source: |
           }
         }
       }
-    } else {
-      // Handle regular parameter - inject directly
-      for (String payload : payloads) {
-        // Custom URL encode the payload (only space, +, #, =) - YOU control the encoding!
-        var encodedPayload = customUrlEncode.apply(payload);
-        
-        // Create new parameter with payload appended
-        var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
-        var mutatedRequest = baseRequest.withParameter(newParam);
-        
-        var result = http.sendRequest(mutatedRequest);
-        if (!result.hasResponse()) continue;
-        
-        var timingOpt = result.timingData();
-        if (timingOpt.isEmpty()) continue;
-        
-        var timing = timingOpt.get();
-        java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
-        long startMs = (tStart != null ? tStart.toMillis() : -1);
-        
-        if (startMs >= detectionThresholdMs && startMs != -1) {
-          var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
-            name, payload, startMs);
-          
-          // Find payload position in request for red marker highlighting (using ByteArray)
-          var reqBytes = mutatedRequest.toByteArray();
-          var payloadIndex = reqBytes.indexOf(encodedPayload);
-          var payloadLength = encodedPayload.length();
-          if (payloadIndex == -1) {
-            var fullyEncodedPayload = api().utilities().urlUtils().encode(payload);
-            payloadIndex = reqBytes.indexOf(fullyEncodedPayload);
-            payloadLength = fullyEncodedPayload.length();
-          }
-          if (payloadIndex == -1) {
-            payloadIndex = reqBytes.indexOf(payload);
-            payloadLength = payload.length();
-          }
-          
-          var markedResult = result;
-          if (payloadIndex != -1) {
-            markedResult = result.withRequestMarkers(
-              Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
-            );
-          }
-          
-          issues.add(
-            AuditIssue.auditIssue(
-              "MySQL Time-Based SQL Injection",
-              detail,
-              "Use parameterized queries",
-              mutatedRequest.url(),
-              AuditIssueSeverity.HIGH,
-              AuditIssueConfidence.CERTAIN,
-              "",
-              "",
-              AuditIssueSeverity.HIGH,
-              markedResult
-            )
-          );
-        }
-      }
     }
+  } catch (Exception e) {
+    // Log any Burp internal exceptions (like burp.Zn0n) for debugging
+    logging().logToError("[MySQLTimeBased] Exception: " + e.getClass().getName() + ": " + e.getMessage());
+    var sw = new java.io.StringWriter();
+    e.printStackTrace(new java.io.PrintWriter(sw));
+    logging().logToError("[MySQLTimeBased] Stack trace:\n" + sw.toString());
+    // Return whatever issues we've collected so far
   }
   
   // Return all issues found (or empty if none)
