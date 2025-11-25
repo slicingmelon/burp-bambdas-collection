@@ -64,133 +64,321 @@ source: |+
     return sb.toString();
   });
 
-  // Helper function to inject payload into a JSON string
-  var injectIntoJson = (java.util.function.BiFunction<String, String, java.util.List<java.util.Map.Entry<String, String>>>)((jsonStr, payload) -> {
-    var results = new java.util.ArrayList<java.util.Map.Entry<String, String>>();
-    try {
-      var jsonNode = JsonNode.jsonNode(jsonStr);
-      var jsonObj = jsonNode.asObject();
+  // Helper to detect JSON-looking strings (used for recursive parsing)
+  var looksLikeJsonString = (java.util.function.Predicate<String>)(str -> {
+    if (str == null) return false;
+    var trimmed = str.strip();
+    if (trimmed.length() < 2) return false;
+    char first = trimmed.charAt(0);
+    char last = trimmed.charAt(trimmed.length() - 1);
+    if ((first == '{' && last == '}') || (first == '[' && last == ']')) {
+      try {
+        return api().utilities().jsonUtils().isValidJson(trimmed);
+      } catch (Exception ignored) {
+        return false;
+      }
+    }
+    return false;
+  });
+
+  // Helper to copy original JSON entries when building mutated variants
+  var copyJsonEntry = (java.util.function.BiConsumer<JsonObjectNode, java.util.Map.Entry<String, JsonNode>>)((dest, srcEntry) -> {
+    var key = srcEntry.getKey();
+    var valueNode = srcEntry.getValue();
+    if (valueNode.isString()) {
+      dest.putString(key, valueNode.asString());
+    } else if (valueNode.isNull()) {
+      dest.put(key, JsonNullNode.jsonNullNode());
+    } else {
+      dest.put(key, valueNode);
+    }
+  });
+
+  // Helper to join nested JSON paths (handles array index notation)
+  var joinFieldPath = (java.util.function.BiFunction<String, String, String>)((base, suffix) -> {
+    if (base == null || base.isEmpty()) return suffix;
+    if (suffix == null || suffix.isEmpty()) return base;
+    if (suffix.startsWith("[")) {
+      return base + suffix;
+    }
+    return base + "." + suffix;
+  });
+
+  // Helper to format nested keys for array elements
+  var formatNestedKey = (java.util.function.Function<String, String>)(key -> {
+    if (key == null || key.isEmpty()) return "";
+    if (key.startsWith("[")) {
+      return key;
+    }
+    return "." + key;
+  });
+
+  // Helper function to inject payload into a JSON string (recursive for nested structures)
+  var injectIntoJson = new java.util.function.BiFunction<String, String, java.util.List<java.util.Map.Entry<String, String>>>() {
+    @Override
+    public java.util.List<java.util.Map.Entry<String, String>> apply(String jsonStr, String payload) {
+      var results = new java.util.ArrayList<java.util.Map.Entry<String, String>>();
+      try {
+        var jsonNode = JsonNode.jsonNode(jsonStr);
+        if (jsonNode.isObject()) {
+          processObject(jsonNode.asObject(), payload, results);
+        } else if (jsonNode.isArray()) {
+          processArray(jsonNode.asArray(), payload, results);
+        }
+      } catch (Exception e) {
+        logging().logToError("[MySQLTimeBased] Failed to parse JSON: " + e.getMessage());
+      }
+      return results;
+    }
+
+    private void processObject(JsonObjectNode jsonObj, String payload, java.util.List<java.util.Map.Entry<String, String>> results) {
       var jsonMap = jsonObj.asMap();
-      
-      // Iterate through each field in the JSON object
+
       for (var entry : jsonMap.entrySet()) {
         String targetKey = entry.getKey();
         var targetValueNode = entry.getValue();
-        
-        // Handle different field types
+
         if (targetValueNode.isString() || targetValueNode.isNull()) {
-          String originalValue = targetValueNode.isString() ? targetValueNode.asString() : "";
-          boolean isEmpty = originalValue.isEmpty();
-          
-          // Test 1: Inject as string
-          var newJsonObj = JsonObjectNode.jsonObjectNode();
-          for (var e : jsonMap.entrySet()) {
-            String k = e.getKey();
-            var valueNode = e.getValue();
-            
-            if (k.equals(targetKey)) {
-              String origVal = valueNode.isString() ? valueNode.asString() : "";
-              newJsonObj.putString(k, origVal + payload);
+          handleStringField(jsonMap, targetKey, targetValueNode, payload, results);
+        }
+
+        if (targetValueNode.isArray()) {
+          handleArrayField(jsonMap, targetKey, targetValueNode.asArray(), payload, results);
+        }
+
+        if (targetValueNode.isObject()) {
+          handleObjectField(jsonMap, targetKey, targetValueNode.asObject(), payload, results);
+        }
+      }
+    }
+
+    private void processArray(JsonArrayNode jsonArray, String payload, java.util.List<java.util.Map.Entry<String, String>> results) {
+      int arraySize = jsonArray.asList().size();
+      for (int i = 0; i < arraySize; i++) {
+        var element = jsonArray.get(i);
+
+        if (element.isString() || element.isNull()) {
+          String originalValue = element.isString() ? element.asString() : "";
+          var newArray = JsonArrayNode.jsonArrayNode();
+          for (int j = 0; j < arraySize; j++) {
+            if (j == i) {
+              newArray.addString(originalValue + payload);
             } else {
-              // Preserve original value with correct type
-              if (valueNode.isString()) {
-                newJsonObj.putString(k, valueNode.asString());
-              } else if (valueNode.isNull()) {
-                newJsonObj.put(k, JsonNullNode.jsonNullNode());
-              } else {
-                newJsonObj.put(k, valueNode);
-              }
+              newArray.add(jsonArray.get(j));
             }
           }
-          String mutatedJsonStr = minifyJson.apply(newJsonObj.toJsonString());
-          results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey, mutatedJsonStr));
-          
-          // Test 2: If field is empty, also try as array (we don't know if backend expects string or array)
-          if (isEmpty) {
-            var newJsonObjArray = JsonObjectNode.jsonObjectNode();
-            for (var e : jsonMap.entrySet()) {
-              String k = e.getKey();
-              var valueNode = e.getValue();
-              
-              if (k.equals(targetKey)) {
-                // Create array with payload
-                var payloadArray = JsonArrayNode.jsonArrayNode();
-                payloadArray.addString(payload);
-                newJsonObjArray.put(k, payloadArray);
-              } else {
-                // Preserve original value with correct type
-                if (valueNode.isString()) {
-                  newJsonObjArray.putString(k, valueNode.asString());
-                } else if (valueNode.isNull()) {
-                  newJsonObjArray.put(k, JsonNullNode.jsonNullNode());
+          results.add(new java.util.AbstractMap.SimpleEntry<>(
+            "[" + i + "]",
+            minifyJson.apply(newArray.toJsonString())
+          ));
+
+          if (looksLikeJsonString.test(originalValue)) {
+            var nestedMutations = this.apply(originalValue, payload);
+            for (var nestedMutation : nestedMutations) {
+              var newArrayNested = JsonArrayNode.jsonArrayNode();
+              for (int j = 0; j < arraySize; j++) {
+                if (j == i) {
+                  newArrayNested.addString(nestedMutation.getValue());
                 } else {
-                  newJsonObjArray.put(k, valueNode);
+                  newArrayNested.add(jsonArray.get(j));
                 }
               }
+              results.add(new java.util.AbstractMap.SimpleEntry<>(
+                "[" + i + "]" + formatNestedKey(nestedMutation.getKey()),
+                minifyJson.apply(newArrayNested.toJsonString())
+              ));
             }
-            String mutatedJsonStrArray = minifyJson.apply(newJsonObjArray.toJsonString());
-            results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey + "[]", mutatedJsonStrArray));
           }
-          
-        } else if (targetValueNode.isArray()) {
-          // Inject into each string element in the array
-          var targetArray = targetValueNode.asArray();
-          int arraySize = targetArray.asList().size();
-          
-          for (int i = 0; i < arraySize; i++) {
-            var arrayElement = targetArray.get(i);
-            
-            // Only inject into string elements
-            if (arrayElement.isString() || arrayElement.isNull()) {
-              var newJsonObj = JsonObjectNode.jsonObjectNode();
-              
-              for (var e : jsonMap.entrySet()) {
-                String k = e.getKey();
-                var valueNode = e.getValue();
-                
-                if (k.equals(targetKey)) {
-                  // Create new array with payload injected at index i
-                  var newArray = JsonArrayNode.jsonArrayNode();
-                  for (int j = 0; j < arraySize; j++) {
-                    var elem = targetArray.get(j);
-                    if (j == i) {
-                      String originalValue = elem.isString() ? elem.asString() : "";
-                      newArray.addString(originalValue + payload);
-                    } else {
-                      if (elem.isString()) {
-                        newArray.addString(elem.asString());
-                      } else if (elem.isNull()) {
-                        newArray.add(JsonNullNode.jsonNullNode());
-                      } else {
-                        newArray.add(elem);
-                      }
-                    }
-                  }
-                  newJsonObj.put(k, newArray);
+        } else if (element.isArray() || element.isObject()) {
+          var nestedMutations = this.apply(element.toJsonString(), payload);
+          for (var nestedMutation : nestedMutations) {
+            try {
+              var mutatedNode = JsonNode.jsonNode(nestedMutation.getValue());
+              var newArray = JsonArrayNode.jsonArrayNode();
+              for (int j = 0; j < arraySize; j++) {
+                if (j == i) {
+                  newArray.add(mutatedNode);
                 } else {
-                  // Preserve original value
-                  if (valueNode.isString()) {
-                    newJsonObj.putString(k, valueNode.asString());
-                  } else if (valueNode.isNull()) {
-                    newJsonObj.put(k, JsonNullNode.jsonNullNode());
-                  } else {
-                    newJsonObj.put(k, valueNode);
-                  }
+                  newArray.add(jsonArray.get(j));
                 }
               }
-              
-              String mutatedJsonStr = minifyJson.apply(newJsonObj.toJsonString());
-              results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey + "[" + i + "]", mutatedJsonStr));
+              results.add(new java.util.AbstractMap.SimpleEntry<>(
+                "[" + i + "]" + formatNestedKey(nestedMutation.getKey()),
+                minifyJson.apply(newArray.toJsonString())
+              ));
+            } catch (Exception ignored) {
+              // Skip malformed nested JSON
             }
           }
         }
-        // Skip object, number, boolean fields for now (can be extended if needed)
       }
-    } catch (Exception e) {
-      logging().logToError("[MySQLTimeBased] Failed to parse JSON: " + e.getMessage());
     }
-    return results;
-  });
+
+    private void handleStringField(java.util.Map<String, JsonNode> jsonMap, String targetKey, JsonNode targetValueNode, String payload, java.util.List<java.util.Map.Entry<String, String>> results) {
+      String originalValue = targetValueNode.isString() ? targetValueNode.asString() : "";
+      boolean isEmpty = originalValue.isEmpty();
+
+      var newJsonObj = JsonObjectNode.jsonObjectNode();
+      for (var e : jsonMap.entrySet()) {
+        if (e.getKey().equals(targetKey)) {
+          String origVal = targetValueNode.isString() ? targetValueNode.asString() : "";
+          newJsonObj.putString(e.getKey(), origVal + payload);
+        } else {
+          copyJsonEntry.accept(newJsonObj, e);
+        }
+      }
+      results.add(new java.util.AbstractMap.SimpleEntry<>(
+        targetKey,
+        minifyJson.apply(newJsonObj.toJsonString())
+      ));
+
+      if (isEmpty) {
+        var newJsonObjArray = JsonObjectNode.jsonObjectNode();
+        for (var e : jsonMap.entrySet()) {
+          if (e.getKey().equals(targetKey)) {
+            var payloadArray = JsonArrayNode.jsonArrayNode();
+            payloadArray.addString(payload);
+            newJsonObjArray.put(e.getKey(), payloadArray);
+          } else {
+            copyJsonEntry.accept(newJsonObjArray, e);
+          }
+        }
+        results.add(new java.util.AbstractMap.SimpleEntry<>(
+          targetKey + "[]",
+          minifyJson.apply(newJsonObjArray.toJsonString())
+        ));
+      }
+
+      if (!originalValue.isEmpty() && looksLikeJsonString.test(originalValue)) {
+        var nestedMutations = this.apply(originalValue, payload);
+        for (var nestedMutation : nestedMutations) {
+          var newJsonObjNested = JsonObjectNode.jsonObjectNode();
+          for (var e : jsonMap.entrySet()) {
+            if (e.getKey().equals(targetKey)) {
+              newJsonObjNested.putString(e.getKey(), nestedMutation.getValue());
+            } else {
+              copyJsonEntry.accept(newJsonObjNested, e);
+            }
+          }
+          results.add(new java.util.AbstractMap.SimpleEntry<>(
+            joinFieldPath.apply(targetKey, nestedMutation.getKey()),
+            minifyJson.apply(newJsonObjNested.toJsonString())
+          ));
+        }
+      }
+    }
+
+    private void handleArrayField(java.util.Map<String, JsonNode> jsonMap, String targetKey, JsonArrayNode targetArray, String payload, java.util.List<java.util.Map.Entry<String, String>> results) {
+      int arraySize = targetArray.asList().size();
+
+      for (int i = 0; i < arraySize; i++) {
+        var arrayElement = targetArray.get(i);
+
+        if (arrayElement.isString() || arrayElement.isNull()) {
+          var newJsonObj = JsonObjectNode.jsonObjectNode();
+          for (var e : jsonMap.entrySet()) {
+            if (e.getKey().equals(targetKey)) {
+              var newArray = JsonArrayNode.jsonArrayNode();
+              for (int j = 0; j < arraySize; j++) {
+                var elem = targetArray.get(j);
+                if (j == i) {
+                  String originalValue = elem.isString() ? elem.asString() : "";
+                  newArray.addString(originalValue + payload);
+                } else {
+                  newArray.add(elem);
+                }
+              }
+              newJsonObj.put(e.getKey(), newArray);
+            } else {
+              copyJsonEntry.accept(newJsonObj, e);
+            }
+          }
+          results.add(new java.util.AbstractMap.SimpleEntry<>(
+            targetKey + "[" + i + "]",
+            minifyJson.apply(newJsonObj.toJsonString())
+          ));
+
+          String originalValue = arrayElement.isString() ? arrayElement.asString() : "";
+          if (!originalValue.isEmpty() && looksLikeJsonString.test(originalValue)) {
+            var nestedMutations = this.apply(originalValue, payload);
+            for (var nestedMutation : nestedMutations) {
+              var newJsonObjNested = JsonObjectNode.jsonObjectNode();
+              for (var e : jsonMap.entrySet()) {
+                if (e.getKey().equals(targetKey)) {
+                  var newArray = JsonArrayNode.jsonArrayNode();
+                  for (int j = 0; j < arraySize; j++) {
+                    if (j == i) {
+                      newArray.addString(nestedMutation.getValue());
+                    } else {
+                      newArray.add(targetArray.get(j));
+                    }
+                  }
+                  newJsonObjNested.put(e.getKey(), newArray);
+                } else {
+                  copyJsonEntry.accept(newJsonObjNested, e);
+                }
+              }
+              results.add(new java.util.AbstractMap.SimpleEntry<>(
+                joinFieldPath.apply(targetKey + "[" + i + "]", nestedMutation.getKey()),
+                minifyJson.apply(newJsonObjNested.toJsonString())
+              ));
+            }
+          }
+        } else if (arrayElement.isArray() || arrayElement.isObject()) {
+          var nestedMutations = this.apply(arrayElement.toJsonString(), payload);
+          for (var nestedMutation : nestedMutations) {
+            try {
+              var mutatedNode = JsonNode.jsonNode(nestedMutation.getValue());
+              var newJsonObj = JsonObjectNode.jsonObjectNode();
+              for (var e : jsonMap.entrySet()) {
+                if (e.getKey().equals(targetKey)) {
+                  var newArray = JsonArrayNode.jsonArrayNode();
+                  for (int j = 0; j < arraySize; j++) {
+                    if (j == i) {
+                      newArray.add(mutatedNode);
+                    } else {
+                      newArray.add(targetArray.get(j));
+                    }
+                  }
+                  newJsonObj.put(e.getKey(), newArray);
+                } else {
+                  copyJsonEntry.accept(newJsonObj, e);
+                }
+              }
+              results.add(new java.util.AbstractMap.SimpleEntry<>(
+                joinFieldPath.apply(targetKey + "[" + i + "]", nestedMutation.getKey()),
+                minifyJson.apply(newJsonObj.toJsonString())
+              ));
+            } catch (Exception ignored) {
+              // Skip malformed nested JSON
+            }
+          }
+        }
+      }
+    }
+
+    private void handleObjectField(java.util.Map<String, JsonNode> jsonMap, String targetKey, JsonObjectNode targetObject, String payload, java.util.List<java.util.Map.Entry<String, String>> results) {
+      var nestedMutations = this.apply(targetObject.toJsonString(), payload);
+      for (var nestedMutation : nestedMutations) {
+        try {
+          var mutatedNode = JsonNode.jsonNode(nestedMutation.getValue());
+          var newJsonObj = JsonObjectNode.jsonObjectNode();
+          for (var e : jsonMap.entrySet()) {
+            if (e.getKey().equals(targetKey)) {
+              newJsonObj.put(e.getKey(), mutatedNode);
+            } else {
+              copyJsonEntry.accept(newJsonObj, e);
+            }
+          }
+          results.add(new java.util.AbstractMap.SimpleEntry<>(
+            joinFieldPath.apply(targetKey, nestedMutation.getKey()),
+            minifyJson.apply(newJsonObj.toJsonString())
+          ));
+        } catch (Exception ignored) {
+          // Skip malformed nested JSON
+        }
+      }
+    }
 
   var baseRequest = requestResponse.request();
   if (baseRequest == null) return;
