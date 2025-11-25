@@ -133,17 +133,30 @@ source: |
     return "." + key;
   });
 
+  // Maximum depth for nested JSON mutations (prevent excessive mutations)
+  var MAX_NESTED_DEPTH = 3;
+  
   // Helper function to inject payload into a JSON string (recursive for nested structures)
   var injectIntoJson = new java.util.function.BiFunction<String, String, java.util.List<java.util.Map.Entry<String, String>>>() {
     @Override
     public java.util.List<java.util.Map.Entry<String, String>> apply(String jsonStr, String payload) {
+      return applyWithDepth(jsonStr, payload, 0);
+    }
+    
+    private java.util.List<java.util.Map.Entry<String, String>> applyWithDepth(String jsonStr, String payload, int depth) {
       var results = new java.util.ArrayList<java.util.Map.Entry<String, String>>();
+      
+      // Limit recursion depth to prevent excessive mutations
+      if (depth >= MAX_NESTED_DEPTH) {
+        return results;
+      }
+      
       try {
         var jsonNode = JsonNode.jsonNode(jsonStr);
         if (jsonNode.isObject()) {
-          processObject(jsonNode.asObject(), payload, results);
+          processObject(jsonNode.asObject(), payload, results, depth);
         } else if (jsonNode.isArray()) {
-          processArray(jsonNode.asArray(), payload, results);
+          processArray(jsonNode.asArray(), payload, results, depth);
         }
       } catch (Exception e) {
         logging().logToError("[MySQLTimeBased] Failed to parse JSON: " + e.getMessage());
@@ -151,7 +164,7 @@ source: |
       return results;
     }
 
-    private void processObject(JsonObjectNode jsonObj, String payload, java.util.List<java.util.Map.Entry<String, String>> results) {
+    private void processObject(JsonObjectNode jsonObj, String payload, java.util.List<java.util.Map.Entry<String, String>> results, int depth) {
       var jsonMap = jsonObj.asMap();
 
       for (var entry : jsonMap.entrySet()) {
@@ -159,20 +172,20 @@ source: |
         var targetValueNode = entry.getValue();
 
         if (targetValueNode.isString() || targetValueNode.isNull()) {
-          handleStringField(jsonMap, targetKey, targetValueNode, payload, results);
+          handleStringField(jsonMap, targetKey, targetValueNode, payload, results, depth);
         }
 
         if (targetValueNode.isArray()) {
-          handleArrayField(jsonMap, targetKey, targetValueNode.asArray(), payload, results);
+          handleArrayField(jsonMap, targetKey, targetValueNode.asArray(), payload, results, depth);
         }
 
         if (targetValueNode.isObject()) {
-          handleObjectField(jsonMap, targetKey, targetValueNode.asObject(), payload, results);
+          handleObjectField(jsonMap, targetKey, targetValueNode.asObject(), payload, results, depth);
         }
       }
     }
 
-    private void processArray(JsonArrayNode jsonArray, String payload, java.util.List<java.util.Map.Entry<String, String>> results) {
+    private void processArray(JsonArrayNode jsonArray, String payload, java.util.List<java.util.Map.Entry<String, String>> results, int depth) {
       int arraySize = jsonArray.asList().size();
       for (int i = 0; i < arraySize; i++) {
         var element = jsonArray.get(i);
@@ -192,8 +205,8 @@ source: |
             minifyJson.apply(newArray.toJsonString())
           ));
 
-          if (looksLikeJsonString.test(originalValue)) {
-            var nestedMutations = this.apply(originalValue, payload);
+          if (depth < MAX_NESTED_DEPTH && looksLikeJsonString.test(originalValue)) {
+            var nestedMutations = this.applyWithDepth(originalValue, payload, depth + 1);
             for (var nestedMutation : nestedMutations) {
               var newArrayNested = JsonArrayNode.jsonArrayNode();
               for (int j = 0; j < arraySize; j++) {
@@ -210,31 +223,33 @@ source: |
             }
           }
         } else if (element.isArray() || element.isObject()) {
-          var nestedMutations = this.apply(element.toJsonString(), payload);
-          for (var nestedMutation : nestedMutations) {
-            try {
-              var mutatedNode = JsonNode.jsonNode(nestedMutation.getValue());
-              var newArray = JsonArrayNode.jsonArrayNode();
-              for (int j = 0; j < arraySize; j++) {
-                if (j == i) {
-                  newArray.add(mutatedNode);
-                } else {
-                  newArray.add(jsonArray.get(j));
+          if (depth < MAX_NESTED_DEPTH) {
+            var nestedMutations = this.applyWithDepth(element.toJsonString(), payload, depth + 1);
+            for (var nestedMutation : nestedMutations) {
+              try {
+                var mutatedNode = JsonNode.jsonNode(nestedMutation.getValue());
+                var newArray = JsonArrayNode.jsonArrayNode();
+                for (int j = 0; j < arraySize; j++) {
+                  if (j == i) {
+                    newArray.add(mutatedNode);
+                  } else {
+                    newArray.add(jsonArray.get(j));
+                  }
                 }
+                results.add(new java.util.AbstractMap.SimpleEntry<>(
+                  "[" + i + "]" + formatNestedKey.apply(nestedMutation.getKey()),
+                  minifyJson.apply(newArray.toJsonString())
+                ));
+              } catch (Exception ignored) {
+                // Skip malformed nested JSON
               }
-              results.add(new java.util.AbstractMap.SimpleEntry<>(
-                "[" + i + "]" + formatNestedKey.apply(nestedMutation.getKey()),
-                minifyJson.apply(newArray.toJsonString())
-              ));
-            } catch (Exception ignored) {
-              // Skip malformed nested JSON
             }
           }
         }
       }
     }
 
-    private void handleStringField(java.util.Map<String, JsonNode> jsonMap, String targetKey, JsonNode targetValueNode, String payload, java.util.List<java.util.Map.Entry<String, String>> results) {
+    private void handleStringField(java.util.Map<String, JsonNode> jsonMap, String targetKey, JsonNode targetValueNode, String payload, java.util.List<java.util.Map.Entry<String, String>> results, int depth) {
       String originalValue = targetValueNode.isString() ? targetValueNode.asString() : "";
       boolean isEmpty = originalValue.isEmpty();
 
@@ -269,8 +284,8 @@ source: |
         ));
       }
 
-      if (!originalValue.isEmpty() && looksLikeJsonString.test(originalValue)) {
-        var nestedMutations = this.apply(originalValue, payload);
+      if (depth < MAX_NESTED_DEPTH && !originalValue.isEmpty() && looksLikeJsonString.test(originalValue)) {
+        var nestedMutations = this.applyWithDepth(originalValue, payload, depth + 1);
         for (var nestedMutation : nestedMutations) {
           var newJsonObjNested = JsonObjectNode.jsonObjectNode();
           for (var e : jsonMap.entrySet()) {
@@ -288,7 +303,7 @@ source: |
       }
     }
 
-    private void handleArrayField(java.util.Map<String, JsonNode> jsonMap, String targetKey, JsonArrayNode targetArray, String payload, java.util.List<java.util.Map.Entry<String, String>> results) {
+    private void handleArrayField(java.util.Map<String, JsonNode> jsonMap, String targetKey, JsonArrayNode targetArray, String payload, java.util.List<java.util.Map.Entry<String, String>> results, int depth) {
       int arraySize = targetArray.asList().size();
 
       for (int i = 0; i < arraySize; i++) {
@@ -319,8 +334,8 @@ source: |
           ));
 
           String originalValue = arrayElement.isString() ? arrayElement.asString() : "";
-          if (!originalValue.isEmpty() && looksLikeJsonString.test(originalValue)) {
-            var nestedMutations = this.apply(originalValue, payload);
+          if (depth < MAX_NESTED_DEPTH && !originalValue.isEmpty() && looksLikeJsonString.test(originalValue)) {
+            var nestedMutations = this.applyWithDepth(originalValue, payload, depth + 1);
             for (var nestedMutation : nestedMutations) {
               var newJsonObjNested = JsonObjectNode.jsonObjectNode();
               for (var e : jsonMap.entrySet()) {
@@ -345,57 +360,61 @@ source: |
             }
           }
         } else if (arrayElement.isArray() || arrayElement.isObject()) {
-          var nestedMutations = this.apply(arrayElement.toJsonString(), payload);
-          for (var nestedMutation : nestedMutations) {
-            try {
-              var mutatedNode = JsonNode.jsonNode(nestedMutation.getValue());
-              var newJsonObj = JsonObjectNode.jsonObjectNode();
-              for (var e : jsonMap.entrySet()) {
-                if (e.getKey().equals(targetKey)) {
-                  var newArray = JsonArrayNode.jsonArrayNode();
-                  for (int j = 0; j < arraySize; j++) {
-                    if (j == i) {
-                      newArray.add(mutatedNode);
-                    } else {
-                      newArray.add(targetArray.get(j));
+          if (depth < MAX_NESTED_DEPTH) {
+            var nestedMutations = this.applyWithDepth(arrayElement.toJsonString(), payload, depth + 1);
+            for (var nestedMutation : nestedMutations) {
+              try {
+                var mutatedNode = JsonNode.jsonNode(nestedMutation.getValue());
+                var newJsonObj = JsonObjectNode.jsonObjectNode();
+                for (var e : jsonMap.entrySet()) {
+                  if (e.getKey().equals(targetKey)) {
+                    var newArray = JsonArrayNode.jsonArrayNode();
+                    for (int j = 0; j < arraySize; j++) {
+                      if (j == i) {
+                        newArray.add(mutatedNode);
+                      } else {
+                        newArray.add(targetArray.get(j));
+                      }
                     }
+                    newJsonObj.put(e.getKey(), newArray);
+                  } else {
+                    copyJsonEntry.accept(newJsonObj, e);
                   }
-                  newJsonObj.put(e.getKey(), newArray);
-                } else {
-                  copyJsonEntry.accept(newJsonObj, e);
                 }
+                results.add(new java.util.AbstractMap.SimpleEntry<>(
+                  joinFieldPath.apply(targetKey + "[" + i + "]", nestedMutation.getKey()),
+                  minifyJson.apply(newJsonObj.toJsonString())
+                ));
+              } catch (Exception ignored) {
+                // Skip malformed nested JSON
               }
-              results.add(new java.util.AbstractMap.SimpleEntry<>(
-                joinFieldPath.apply(targetKey + "[" + i + "]", nestedMutation.getKey()),
-                minifyJson.apply(newJsonObj.toJsonString())
-              ));
-            } catch (Exception ignored) {
-              // Skip malformed nested JSON
             }
           }
         }
       }
     }
 
-    private void handleObjectField(java.util.Map<String, JsonNode> jsonMap, String targetKey, JsonObjectNode targetObject, String payload, java.util.List<java.util.Map.Entry<String, String>> results) {
-      var nestedMutations = this.apply(targetObject.toJsonString(), payload);
-      for (var nestedMutation : nestedMutations) {
-        try {
-          var mutatedNode = JsonNode.jsonNode(nestedMutation.getValue());
-          var newJsonObj = JsonObjectNode.jsonObjectNode();
-          for (var e : jsonMap.entrySet()) {
-            if (e.getKey().equals(targetKey)) {
-              newJsonObj.put(e.getKey(), mutatedNode);
-            } else {
-              copyJsonEntry.accept(newJsonObj, e);
+    private void handleObjectField(java.util.Map<String, JsonNode> jsonMap, String targetKey, JsonObjectNode targetObject, String payload, java.util.List<java.util.Map.Entry<String, String>> results, int depth) {
+      if (depth < MAX_NESTED_DEPTH) {
+        var nestedMutations = this.applyWithDepth(targetObject.toJsonString(), payload, depth + 1);
+        for (var nestedMutation : nestedMutations) {
+          try {
+            var mutatedNode = JsonNode.jsonNode(nestedMutation.getValue());
+            var newJsonObj = JsonObjectNode.jsonObjectNode();
+            for (var e : jsonMap.entrySet()) {
+              if (e.getKey().equals(targetKey)) {
+                newJsonObj.put(e.getKey(), mutatedNode);
+              } else {
+                copyJsonEntry.accept(newJsonObj, e);
+              }
             }
+            results.add(new java.util.AbstractMap.SimpleEntry<>(
+              joinFieldPath.apply(targetKey, nestedMutation.getKey()),
+              minifyJson.apply(newJsonObj.toJsonString())
+            ));
+          } catch (Exception ignored) {
+            // Skip malformed nested JSON
           }
-          results.add(new java.util.AbstractMap.SimpleEntry<>(
-            joinFieldPath.apply(targetKey, nestedMutation.getKey()),
-            minifyJson.apply(newJsonObj.toJsonString())
-          ));
-        } catch (Exception ignored) {
-          // Skip malformed nested JSON
         }
       }
     }
@@ -464,75 +483,40 @@ source: |
             continue;
           }
           
-          // Get raw request as string (simpler approach)
-          var requestStr = baseRequest.toByteArray().toString();
-          
-          // Try to find the parameter - try multiple approaches since encoding may vary
-          var mutatedRequestStr = requestStr;
-          boolean replaced = false;
-          
-          try {
-            // Use replaceFirst() to only modify URL line, not headers like Referer
-            // Attempt 1: Search for URL-encoded version (using Burp's encoder)
-            var originalEncodedValue = api().utilities().urlUtils().encode(decodedValue);
-            var searchPatternEncoded = java.util.regex.Pattern.quote(name + "=" + originalEncodedValue);
-            if (requestStr.contains(name + "=" + originalEncodedValue)) {
-              mutatedRequestStr = requestStr.replaceFirst(searchPatternEncoded, java.util.regex.Matcher.quoteReplacement(name + "=" + encodedMutatedJson));
-              replaced = true;
-            }
-            
-            // Attempt 2: Search for the raw value (parameter.value() - might be as-is from URL)
-            if (!replaced) {
-              var searchPatternValue = java.util.regex.Pattern.quote(name + "=" + value);
-              if (requestStr.contains(name + "=" + value)) {
-                mutatedRequestStr = requestStr.replaceFirst(searchPatternValue, java.util.regex.Matcher.quoteReplacement(name + "=" + encodedMutatedJson));
-                replaced = true;
-              }
-            }
-            
-            // Attempt 3: Search for raw decoded JSON (if request has unencoded JSON)
-            if (!replaced) {
-              var searchPatternRaw = java.util.regex.Pattern.quote(name + "=" + decodedValue);
-              if (requestStr.contains(name + "=" + decodedValue)) {
-                mutatedRequestStr = requestStr.replaceFirst(searchPatternRaw, java.util.regex.Matcher.quoteReplacement(name + "=" + encodedMutatedJson));
-                replaced = true;
-              }
-            }
-          } catch (Exception e) {
-            logging().logToError("[MySQLTimeBased] Error in string replacement: " + e.getMessage());
-            continue;
+          // Limit request size to prevent crashes (max 64KB)
+          if (mutatedJson.length() > 65536) {
+            continue; // Skip mutations that would create too large requests
           }
           
-          // Skip if we couldn't find the parameter to replace
-          if (!replaced) continue;
-          
-          // Add cache buster directly to URL string (before " HTTP/1" to avoid parsing issues)
-          try {
-            if (bypassCache) {
-              var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
-              int httpIdx = mutatedRequestStr.indexOf(" HTTP/1");
-              if (httpIdx > 0) {
-                mutatedRequestStr = mutatedRequestStr.substring(0, httpIdx) + "&_czb=" + cacheBuster + mutatedRequestStr.substring(httpIdx);
-              }
-            }
-          } catch (Exception e) {
-            logging().logToError("[MySQLTimeBased] Error adding cache buster: " + e.getMessage());
-          }
-          
-          // Create and send the mutated request
+          // Use withParameter instead of string manipulation for more reliable request building
           HttpRequestResponse result;
           HttpRequest mutatedRequest;
           long elapsedMs;
           try {
-            // Create request from ByteArray (like CookiePrefixBypass does)
-            var requestBytes = ByteArray.byteArray(mutatedRequestStr);
-            mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), requestBytes);
+            // Build request using withParameter (more reliable than string replacement)
+            var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
+            mutatedRequest = baseRequest.withParameter(newParam);
+            
+            // Add cache buster if enabled
+            if (bypassCache) {
+              var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
+              mutatedRequest = mutatedRequest.withAddedParameters(
+                HttpParameter.urlParameter("_czb", cacheBuster)
+              );
+            }
           } catch (Exception e) {
-            logging().logToError("[MySQLTimeBased] Error creating request: " + e.getMessage());
-            var sw = new java.io.StringWriter();
-            e.printStackTrace(new java.io.PrintWriter(sw));
-            logging().logToError(sw.toString());
+            logging().logToError("[MySQLTimeBased] Error creating request (JSON): " + e.getMessage());
             continue;
+          }
+          
+          // Validate request before sending
+          try {
+            var testBytes = mutatedRequest.toByteArray();
+            if (testBytes.length() > 1048576) { // Skip requests larger than 1MB
+              continue;
+            }
+          } catch (Exception e) {
+            continue; // Skip if we can't validate
           }
           
           try {
@@ -540,11 +524,8 @@ source: |
             result = http.sendRequest(mutatedRequest);
             long endTime = System.currentTimeMillis();
             elapsedMs = endTime - startTime;
-          } catch (Exception e) {
-            logging().logToError("[MySQLTimeBased] Error sending request (JSON): " + e.getMessage());
-            var sw = new java.io.StringWriter();
-            e.printStackTrace(new java.io.PrintWriter(sw));
-            logging().logToError(sw.toString());
+          } catch (Throwable t) { // Catch all exceptions including RuntimeException
+            // Silently skip - don't log to avoid spam, just continue
             continue;
           }
           
@@ -586,71 +567,41 @@ source: |
           continue;
         }
         
-        // Get raw request as string (simpler approach)
-        var requestStr = baseRequest.toByteArray().toString();
-        
-        // Find the parameter in the raw request and append payload
-        var mutatedRequestStr = requestStr;
-        boolean replaced = false;
-        
-        try {
-          // Use replaceFirst() to only modify URL line, not headers like Referer
-          // Attempt 1: Search with URL-encoded name and value
-          var encodedName = api().utilities().urlUtils().encode(name);
-          var encodedValue = api().utilities().urlUtils().encode(value);
-          var searchPatternEncoded = encodedName + "=" + encodedValue;
-          if (requestStr.contains(searchPatternEncoded)) {
-            var pattern = java.util.regex.Pattern.quote(searchPatternEncoded);
-            var replacement = java.util.regex.Matcher.quoteReplacement(searchPatternEncoded + encodedPayload);
-            mutatedRequestStr = requestStr.replaceFirst(pattern, replacement);
-            replaced = true;
-          }
-          
-          // Attempt 2: Search with raw name=value
-          if (!replaced) {
-            var searchPatternRaw = name + "=" + value;
-            if (requestStr.contains(searchPatternRaw)) {
-              var pattern = java.util.regex.Pattern.quote(searchPatternRaw);
-              var replacement = java.util.regex.Matcher.quoteReplacement(searchPatternRaw + encodedPayload);
-              mutatedRequestStr = requestStr.replaceFirst(pattern, replacement);
-              replaced = true;
-            }
-          }
-        } catch (Exception e) {
-          logging().logToError("[MySQLTimeBased] Error in string replacement (regular): " + e.getMessage());
-          continue;
+        // Limit payload size to prevent crashes
+        if (encodedPayload.length() > 1024) {
+          continue; // Skip payloads that are too large
         }
         
-        // Skip if we couldn't find the parameter
-        if (!replaced) continue;
-        
-        // Add cache buster directly to URL string (before " HTTP/1")
-        try {
-          if (bypassCache) {
-            var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
-            int httpIdx = mutatedRequestStr.indexOf(" HTTP/1");
-            if (httpIdx > 0) {
-              mutatedRequestStr = mutatedRequestStr.substring(0, httpIdx) + "&_czb=" + cacheBuster + mutatedRequestStr.substring(httpIdx);
-            }
-          }
-        } catch (Exception e) {
-          // Continue without cache buster
-        }
-        
-        // Create and send the mutated request
+        // Use withParameter instead of string manipulation for more reliable request building
         HttpRequestResponse result;
         HttpRequest mutatedRequest;
         long elapsedMs;
         try {
-          // Create request from ByteArray (like CookiePrefixBypass does)
-          var requestBytes = ByteArray.byteArray(mutatedRequestStr);
-          mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), requestBytes);
+          // Build request using withParameter (more reliable than string replacement)
+          var newValue = value + encodedPayload;
+          var newParam = HttpParameter.urlParameter(name, newValue);
+          mutatedRequest = baseRequest.withParameter(newParam);
+          
+          // Add cache buster if enabled
+          if (bypassCache) {
+            var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
+            mutatedRequest = mutatedRequest.withAddedParameters(
+              HttpParameter.urlParameter("_czb", cacheBuster)
+            );
+          }
         } catch (Exception e) {
           logging().logToError("[MySQLTimeBased] Error creating request (regular): " + e.getMessage());
-          var sw = new java.io.StringWriter();
-          e.printStackTrace(new java.io.PrintWriter(sw));
-          logging().logToError(sw.toString());
           continue;
+        }
+        
+        // Validate request before sending
+        try {
+          var testBytes = mutatedRequest.toByteArray();
+          if (testBytes.length() > 1048576) { // Skip requests larger than 1MB
+            continue;
+          }
+        } catch (Exception e) {
+          continue; // Skip if we can't validate
         }
         
         try {
@@ -658,11 +609,8 @@ source: |
           result = http.sendRequest(mutatedRequest);
           long endTime = System.currentTimeMillis();
           elapsedMs = endTime - startTime;
-        } catch (Exception e) {
-          logging().logToError("[MySQLTimeBased] Error sending request (regular): " + e.getMessage());
-          var sw = new java.io.StringWriter();
-          e.printStackTrace(new java.io.PrintWriter(sw));
-          logging().logToError(sw.toString());
+        } catch (Throwable t) { // Catch all exceptions including RuntimeException
+          // Silently skip - don't log to avoid spam, just continue
           continue;
         }
         
