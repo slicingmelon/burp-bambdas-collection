@@ -12,10 +12,6 @@ source: |
   * @author slicingmelon
   **/
   
-  if (!requestResponse.hasResponse()) {
-    return AuditResult.auditResult();
-  }
-  
   // Collect issues to return
   var issues = new java.util.ArrayList<AuditIssue>();
   
@@ -307,13 +303,27 @@ source: |
           HttpRequest mutatedRequest;
           long elapsedMs;
           try {
-            mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
+            // Create request from ByteArray (like CookiePrefixBypass does)
+            var requestBytes = ByteArray.byteArray(mutatedRequestStr);
+            mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), requestBytes);
+          } catch (Exception e) {
+            logging().logToError("[MySQLTimeBased] Error creating request: " + e.getMessage());
+            var sw = new java.io.StringWriter();
+            e.printStackTrace(new java.io.PrintWriter(sw));
+            logging().logToError(sw.toString());
+            continue;
+          }
+          
+          try {
             long startTime = System.currentTimeMillis();
-            result = http.sendRequest(mutatedRequest);
+            result = api().http().sendRequest(mutatedRequest);
             long endTime = System.currentTimeMillis();
             elapsedMs = endTime - startTime;
           } catch (Exception e) {
             logging().logToError("[MySQLTimeBased] Error sending request: " + e.getMessage());
+            var sw = new java.io.StringWriter();
+            e.printStackTrace(new java.io.PrintWriter(sw));
+            logging().logToError(sw.toString());
             continue;
           }
           
@@ -411,13 +421,27 @@ source: |
         HttpRequest mutatedRequest;
         long elapsedMs;
         try {
-          mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
+          // Create request from ByteArray (like CookiePrefixBypass does)
+          var requestBytes = ByteArray.byteArray(mutatedRequestStr);
+          mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), requestBytes);
+        } catch (Exception e) {
+          logging().logToError("[MySQLTimeBased] Error creating request (regular): " + e.getMessage());
+          var sw = new java.io.StringWriter();
+          e.printStackTrace(new java.io.PrintWriter(sw));
+          logging().logToError(sw.toString());
+          continue;
+        }
+        
+        try {
           long startTime = System.currentTimeMillis();
-          result = http.sendRequest(mutatedRequest);
+          result = api().http().sendRequest(mutatedRequest);
           long endTime = System.currentTimeMillis();
           elapsedMs = endTime - startTime;
         } catch (Exception e) {
           logging().logToError("[MySQLTimeBased] Error sending request (regular): " + e.getMessage());
+          var sw = new java.io.StringWriter();
+          e.printStackTrace(new java.io.PrintWriter(sw));
+          logging().logToError(sw.toString());
           continue;
         }
         
