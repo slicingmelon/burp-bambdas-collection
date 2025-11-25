@@ -184,7 +184,7 @@ source: |+
                 }
               }
               results.add(new java.util.AbstractMap.SimpleEntry<>(
-                "[" + i + "]" + formatNestedKey(nestedMutation.getKey()),
+                "[" + i + "]" + formatNestedKey.apply(nestedMutation.getKey()),
                 minifyJson.apply(newArrayNested.toJsonString())
               ));
             }
@@ -203,7 +203,7 @@ source: |+
                 }
               }
               results.add(new java.util.AbstractMap.SimpleEntry<>(
-                "[" + i + "]" + formatNestedKey(nestedMutation.getKey()),
+                "[" + i + "]" + formatNestedKey.apply(nestedMutation.getKey()),
                 minifyJson.apply(newArray.toJsonString())
               ));
             } catch (Exception ignored) {
@@ -379,6 +379,7 @@ source: |+
         }
       }
     }
+  };
 
   var baseRequest = requestResponse.request();
   if (baseRequest == null) return;
