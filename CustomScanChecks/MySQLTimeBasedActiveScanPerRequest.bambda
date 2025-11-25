@@ -218,28 +218,44 @@ source: |
       
       // Handle JSON parameter - inject into each JSON field
       for (String payload : payloads) {
-        var jsonMutations = injectIntoJson.apply(decodedValue, payload);
+        java.util.List<java.util.Map.Entry<String, String>> jsonMutations;
+        try {
+          jsonMutations = injectIntoJson.apply(decodedValue, payload);
+        } catch (Exception e) {
+          logging().logToError("[MySQLTimeBased] Error creating JSON mutations: " + e.getMessage());
+          continue;
+        }
         
         for (var jsonMutation : jsonMutations) {
+          var jsonField = jsonMutation.getKey();
+          var mutatedJson = jsonMutation.getValue();
+          
+          // Validate mutated JSON is still valid
           try {
-            var jsonField = jsonMutation.getKey();
-            var mutatedJson = jsonMutation.getValue();
-            
-            // Validate mutated JSON is still valid
             if (!api().utilities().jsonUtils().isValidJson(mutatedJson)) {
               continue;
             }
-            
-            // URL-encode the mutated JSON for proper URL formatting
-            var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
-            
-            // Get raw request as string
-            var requestStr = new String(baseRequest.toByteArray().getBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            
-            // Try to find the parameter - try multiple approaches since encoding may vary
-            var mutatedRequestStr = requestStr;
-            boolean replaced = false;
-            
+          } catch (Exception e) {
+            continue;
+          }
+          
+          // URL-encode the mutated JSON for proper URL formatting
+          String encodedMutatedJson;
+          try {
+            encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
+          } catch (Exception e) {
+            logging().logToError("[MySQLTimeBased] Error encoding JSON: " + e.getMessage());
+            continue;
+          }
+          
+          // Get raw request as string (simpler approach)
+          var requestStr = baseRequest.toByteArray().toString();
+          
+          // Try to find the parameter - try multiple approaches since encoding may vary
+          var mutatedRequestStr = requestStr;
+          boolean replaced = false;
+          
+          try {
             // Attempt 1: Search for URL-encoded version (using Burp's encoder)
             var originalEncodedValue = api().utilities().urlUtils().encode(decodedValue);
             var searchPatternEncoded = name + "=" + originalEncodedValue;
@@ -265,11 +281,16 @@ source: |
                 replaced = true;
               }
             }
-            
-            // Skip if we couldn't find the parameter to replace
-            if (!replaced) continue;
-            
-            // Add cache buster directly to URL string (before " HTTP/1" to avoid parsing issues)
+          } catch (Exception e) {
+            logging().logToError("[MySQLTimeBased] Error in string replacement: " + e.getMessage());
+            continue;
+          }
+          
+          // Skip if we couldn't find the parameter to replace
+          if (!replaced) continue;
+          
+          // Add cache buster directly to URL string (before " HTTP/1" to avoid parsing issues)
+          try {
             if (bypassCache) {
               var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
               int httpIdx = mutatedRequestStr.indexOf(" HTTP/1");
@@ -277,46 +298,35 @@ source: |
                 mutatedRequestStr = mutatedRequestStr.substring(0, httpIdx) + "&_czb=" + cacheBuster + mutatedRequestStr.substring(httpIdx);
               }
             }
-            
-            var mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
-            
-            // Manual timing for accurate measurement in concurrent scans
+          } catch (Exception e) {
+            logging().logToError("[MySQLTimeBased] Error adding cache buster: " + e.getMessage());
+          }
+          
+          // Create and send the mutated request
+          HttpRequestResponse result;
+          HttpRequest mutatedRequest;
+          long elapsedMs;
+          try {
+            mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
             long startTime = System.currentTimeMillis();
-            var result = http.sendRequest(mutatedRequest);
+            result = http.sendRequest(mutatedRequest);
             long endTime = System.currentTimeMillis();
-            long elapsedMs = endTime - startTime;
+            elapsedMs = endTime - startTime;
+          } catch (Exception e) {
+            logging().logToError("[MySQLTimeBased] Error sending request: " + e.getMessage());
+            continue;
+          }
+          
+          if (!result.hasResponse()) continue;
+          
+          if (elapsedMs >= detectionThresholdMs) {
+            logging().logToOutput("[MySQLTimeBased] FOUND! JSON param '" + name + "' field '" + jsonField + "' took " + elapsedMs + "ms");
             
-            if (!result.hasResponse()) continue;
+            var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
+              name, jsonField, payload, elapsedMs);
             
-            if (elapsedMs >= detectionThresholdMs) {
-              logging().logToOutput("[MySQLTimeBased] FOUND! JSON param '" + name + "' field '" + jsonField + "' took " + elapsedMs + "ms");
-              
-              var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
-                name, jsonField, payload, elapsedMs);
-              
-              // Try to find payload for markers (optional - use unmarked result if not found)
-              var markedResult = result;
-              try {
-                var reqBytes = mutatedRequest.toByteArray();
-                var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
-                var payloadIndex = reqBytes.indexOf(urlEncodedPayload);
-                if (payloadIndex >= 0) {
-                  markedResult = result.withRequestMarkers(
-                    Marker.marker(Range.range(payloadIndex, payloadIndex + urlEncodedPayload.length()))
-                  );
-                } else {
-                  payloadIndex = reqBytes.indexOf(payload);
-                  if (payloadIndex >= 0) {
-                    markedResult = result.withRequestMarkers(
-                      Marker.marker(Range.range(payloadIndex, payloadIndex + payload.length()))
-                    );
-                  }
-                }
-              } catch (Exception markerEx) {
-                // Use unmarked result if marker creation fails
-              }
-              
-              // Create the audit issue
+            // Create the audit issue (use result without markers to avoid issues)
+            try {
               var issue = AuditIssue.auditIssue(
                 "MySQL Time-Based SQL Injection (JSON)",
                 detail,
@@ -327,37 +337,37 @@ source: |
                 "Time-based SQL injection allows attackers to extract data by observing response delays.",
                 "",
                 AuditIssueSeverity.HIGH,
-                markedResult
+                result
               );
               
               // Add to issues list for return
               issues.add(issue);
-              
-              // Also add to sitemap as a backup (like Repeater version)
-              api().siteMap().add(issue);
-              
               logging().logToOutput("[MySQLTimeBased] Issue added for JSON param '" + name + "' field '" + jsonField + "'");
+            } catch (Exception e) {
+              logging().logToError("[MySQLTimeBased] Error creating issue: " + e.getMessage());
             }
-          } catch (Exception e) {
-            logging().logToError("[MySQLTimeBased] Error processing JSON param " + name + ": " + e.getMessage());
           }
         }
       }
     } else {
       // Handle regular parameter - inject directly using raw string replacement
       for (String payload : payloads) {
+        // Custom URL encode the payload (only space, +, #, =)
+        String encodedPayload;
         try {
-          // Custom URL encode the payload (only space, +, #, =)
-          var encodedPayload = customUrlEncode.apply(payload);
-          
-          // Get raw request as string
-          var requestStr = new String(baseRequest.toByteArray().getBytes(), java.nio.charset.StandardCharsets.UTF_8);
-          
-          // Find the parameter in the raw request and append payload
-          // Try both encoded and raw versions of the parameter value
-          var mutatedRequestStr = requestStr;
-          boolean replaced = false;
-          
+          encodedPayload = customUrlEncode.apply(payload);
+        } catch (Exception e) {
+          continue;
+        }
+        
+        // Get raw request as string (simpler approach)
+        var requestStr = baseRequest.toByteArray().toString();
+        
+        // Find the parameter in the raw request and append payload
+        var mutatedRequestStr = requestStr;
+        boolean replaced = false;
+        
+        try {
           // Attempt 1: Search with URL-encoded name and value
           var encodedName = api().utilities().urlUtils().encode(name);
           var encodedValue = api().utilities().urlUtils().encode(value);
@@ -375,11 +385,16 @@ source: |
               replaced = true;
             }
           }
-          
-          // Skip if we couldn't find the parameter
-          if (!replaced) continue;
-          
-          // Add cache buster directly to URL string (before " HTTP/1")
+        } catch (Exception e) {
+          logging().logToError("[MySQLTimeBased] Error in string replacement (regular): " + e.getMessage());
+          continue;
+        }
+        
+        // Skip if we couldn't find the parameter
+        if (!replaced) continue;
+        
+        // Add cache buster directly to URL string (before " HTTP/1")
+        try {
           if (bypassCache) {
             var cacheBuster = api().utilities().randomUtils().randomString(14, alphabet);
             int httpIdx = mutatedRequestStr.indexOf(" HTTP/1");
@@ -387,45 +402,35 @@ source: |
               mutatedRequestStr = mutatedRequestStr.substring(0, httpIdx) + "&_czb=" + cacheBuster + mutatedRequestStr.substring(httpIdx);
             }
           }
-          
-          var mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
-          
-          // Manual timing for accurate measurement in concurrent scans
+        } catch (Exception e) {
+          // Continue without cache buster
+        }
+        
+        // Create and send the mutated request
+        HttpRequestResponse result;
+        HttpRequest mutatedRequest;
+        long elapsedMs;
+        try {
+          mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
           long startTime = System.currentTimeMillis();
-          var result = http.sendRequest(mutatedRequest);
+          result = http.sendRequest(mutatedRequest);
           long endTime = System.currentTimeMillis();
-          long elapsedMs = endTime - startTime;
+          elapsedMs = endTime - startTime;
+        } catch (Exception e) {
+          logging().logToError("[MySQLTimeBased] Error sending request (regular): " + e.getMessage());
+          continue;
+        }
+        
+        if (!result.hasResponse()) continue;
+        
+        if (elapsedMs >= detectionThresholdMs) {
+          logging().logToOutput("[MySQLTimeBased] FOUND! Param '" + name + "' took " + elapsedMs + "ms");
           
-          if (!result.hasResponse()) continue;
+          var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
+            name, payload, elapsedMs);
           
-          if (elapsedMs >= detectionThresholdMs) {
-            logging().logToOutput("[MySQLTimeBased] FOUND! Param '" + name + "' took " + elapsedMs + "ms");
-            
-            var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
-              name, payload, elapsedMs);
-            
-            // Try to find payload for markers (optional - use unmarked result if not found)
-            var markedResult = result;
-            try {
-              var reqBytes = mutatedRequest.toByteArray();
-              var payloadIndex = reqBytes.indexOf(encodedPayload);
-              if (payloadIndex >= 0) {
-                markedResult = result.withRequestMarkers(
-                  Marker.marker(Range.range(payloadIndex, payloadIndex + encodedPayload.length()))
-                );
-              } else {
-                payloadIndex = reqBytes.indexOf(payload);
-                if (payloadIndex >= 0) {
-                  markedResult = result.withRequestMarkers(
-                    Marker.marker(Range.range(payloadIndex, payloadIndex + payload.length()))
-                  );
-                }
-              }
-            } catch (Exception markerEx) {
-              // Use unmarked result if marker creation fails
-            }
-            
-            // Create the audit issue
+          // Create the audit issue (use result without markers to avoid issues)
+          try {
             var issue = AuditIssue.auditIssue(
               "MySQL Time-Based SQL Injection",
               detail,
@@ -436,19 +441,15 @@ source: |
               "Time-based SQL injection allows attackers to extract data by observing response delays.",
               "",
               AuditIssueSeverity.HIGH,
-              markedResult
+              result
             );
             
             // Add to issues list for return
             issues.add(issue);
-            
-            // Also add to sitemap as a backup (like Repeater version)
-            api().siteMap().add(issue);
-            
             logging().logToOutput("[MySQLTimeBased] Issue added for param '" + name + "'");
+          } catch (Exception e) {
+            logging().logToError("[MySQLTimeBased] Error creating issue (regular): " + e.getMessage());
           }
-        } catch (Exception e) {
-          logging().logToError("[MySQLTimeBased] Error processing param " + name + ": " + e.getMessage());
         }
       }
     }
