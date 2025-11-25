@@ -289,31 +289,36 @@ source: |
             if (!result.hasResponse()) continue;
             
             if (elapsedMs >= detectionThresholdMs) {
+              logging().logToOutput("[MySQLTimeBased] FOUND! JSON param '" + name + "' field '" + jsonField + "' took " + elapsedMs + "ms");
+              
               var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
                 name, jsonField, payload, elapsedMs);
               
-              // Try to find payload for markers (optional - skip if not found)
+              // Try to find payload for markers (optional - use unmarked result if not found)
               var markedResult = result;
-              var reqBytes = mutatedRequest.toByteArray();
-              var payloadBytes = ByteArray.byteArray(payload);
-              var payloadIndex = reqBytes.indexOf(payloadBytes);
-              if (payloadIndex >= 0) {
-                markedResult = result.withRequestMarkers(
-                  Marker.marker(Range.range(payloadIndex, payloadIndex + payload.length()))
-                );
-              } else {
+              try {
+                var reqBytes = mutatedRequest.toByteArray();
                 var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
-                var encodedBytes = ByteArray.byteArray(urlEncodedPayload);
-                payloadIndex = reqBytes.indexOf(encodedBytes);
+                var payloadIndex = reqBytes.indexOf(urlEncodedPayload);
                 if (payloadIndex >= 0) {
                   markedResult = result.withRequestMarkers(
                     Marker.marker(Range.range(payloadIndex, payloadIndex + urlEncodedPayload.length()))
                   );
+                } else {
+                  payloadIndex = reqBytes.indexOf(payload);
+                  if (payloadIndex >= 0) {
+                    markedResult = result.withRequestMarkers(
+                      Marker.marker(Range.range(payloadIndex, payloadIndex + payload.length()))
+                    );
+                  }
                 }
+              } catch (Exception markerEx) {
+                // Use unmarked result if marker creation fails
               }
               
-              issues.add(AuditIssue.auditIssue(
-                "MySQL Time-Based SQL Injection (JSON) - " + jsonField,
+              // Create the audit issue
+              var issue = AuditIssue.auditIssue(
+                "MySQL Time-Based SQL Injection (JSON)",
                 detail,
                 "Use parameterized queries to prevent SQL injection.",
                 mutatedRequest.url(),
@@ -323,10 +328,18 @@ source: |
                 "",
                 AuditIssueSeverity.HIGH,
                 markedResult
-              ));
+              );
+              
+              // Add to issues list for return
+              issues.add(issue);
+              
+              // Also add to sitemap as a backup (like Repeater version)
+              api().siteMap().add(issue);
+              
+              logging().logToOutput("[MySQLTimeBased] Issue added for JSON param '" + name + "' field '" + jsonField + "'");
             }
           } catch (Exception e) {
-            // Continue with next payload on error
+            logging().logToError("[MySQLTimeBased] Error processing JSON param " + name + ": " + e.getMessage());
           }
         }
       }
@@ -386,30 +399,35 @@ source: |
           if (!result.hasResponse()) continue;
           
           if (elapsedMs >= detectionThresholdMs) {
+            logging().logToOutput("[MySQLTimeBased] FOUND! Param '" + name + "' took " + elapsedMs + "ms");
+            
             var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
               name, payload, elapsedMs);
             
-            // Try to find payload for markers (optional - skip if not found)
+            // Try to find payload for markers (optional - use unmarked result if not found)
             var markedResult = result;
-            var reqBytes = mutatedRequest.toByteArray();
-            var encodedBytes = ByteArray.byteArray(encodedPayload);
-            var payloadIndex = reqBytes.indexOf(encodedBytes);
-            if (payloadIndex >= 0) {
-              markedResult = result.withRequestMarkers(
-                Marker.marker(Range.range(payloadIndex, payloadIndex + encodedPayload.length()))
-              );
-            } else {
-              var payloadBytes = ByteArray.byteArray(payload);
-              payloadIndex = reqBytes.indexOf(payloadBytes);
+            try {
+              var reqBytes = mutatedRequest.toByteArray();
+              var payloadIndex = reqBytes.indexOf(encodedPayload);
               if (payloadIndex >= 0) {
                 markedResult = result.withRequestMarkers(
-                  Marker.marker(Range.range(payloadIndex, payloadIndex + payload.length()))
+                  Marker.marker(Range.range(payloadIndex, payloadIndex + encodedPayload.length()))
                 );
+              } else {
+                payloadIndex = reqBytes.indexOf(payload);
+                if (payloadIndex >= 0) {
+                  markedResult = result.withRequestMarkers(
+                    Marker.marker(Range.range(payloadIndex, payloadIndex + payload.length()))
+                  );
+                }
               }
+            } catch (Exception markerEx) {
+              // Use unmarked result if marker creation fails
             }
             
-            issues.add(AuditIssue.auditIssue(
-              "MySQL Time-Based SQL Injection - " + name,
+            // Create the audit issue
+            var issue = AuditIssue.auditIssue(
+              "MySQL Time-Based SQL Injection",
               detail,
               "Use parameterized queries to prevent SQL injection.",
               mutatedRequest.url(),
@@ -419,14 +437,25 @@ source: |
               "",
               AuditIssueSeverity.HIGH,
               markedResult
-            ));
+            );
+            
+            // Add to issues list for return
+            issues.add(issue);
+            
+            // Also add to sitemap as a backup (like Repeater version)
+            api().siteMap().add(issue);
+            
+            logging().logToOutput("[MySQLTimeBased] Issue added for param '" + name + "'");
           }
         } catch (Exception e) {
-          // Continue with next payload on error
+          logging().logToError("[MySQLTimeBased] Error processing param " + name + ": " + e.getMessage());
         }
       }
     }
   }
   
   // Return collected issues
+  if (!issues.isEmpty()) {
+    logging().logToOutput("[MySQLTimeBased] Returning " + issues.size() + " issue(s)");
+  }
   return AuditResult.auditResult(issues);
