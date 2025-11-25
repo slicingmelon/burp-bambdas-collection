@@ -258,20 +258,22 @@ source: |
                 );
               }
               
-              issues.add(
-                AuditIssue.auditIssue(
-                  "MySQL Time-Based SQL Injection (JSON)",
-                  detail,
-                  "Use parameterized queries",
-                  mutatedRequest.url(),
-                  AuditIssueSeverity.HIGH,
-                  AuditIssueConfidence.CERTAIN,
-                  "",
-                  "",
-                  AuditIssueSeverity.HIGH,
-                  markedResult
-                )
+              var issue = AuditIssue.auditIssue(
+                "MySQL Time-Based SQL Injection (JSON)",
+                detail,
+                "Use parameterized queries",
+                mutatedRequest.url(),
+                AuditIssueSeverity.HIGH,
+                AuditIssueConfidence.CERTAIN,
+                "",
+                "",
+                AuditIssueSeverity.HIGH,
+                markedResult
               );
+              
+              // Report immediately to siteMap (survives crashes)
+              api().siteMap().add(issue);
+              issues.add(issue);
             }
           } catch (Exception e) {
             // Log error but continue with next payload
@@ -324,20 +326,22 @@ source: |
               );
             }
             
-            issues.add(
-              AuditIssue.auditIssue(
-                "MySQL Time-Based SQL Injection",
-                detail,
-                "Use parameterized queries",
-                mutatedRequest.url(),
-                AuditIssueSeverity.HIGH,
-                AuditIssueConfidence.CERTAIN,
-                "",
-                "",
-                AuditIssueSeverity.HIGH,
-                markedResult
-              )
+            var issue = AuditIssue.auditIssue(
+              "MySQL Time-Based SQL Injection",
+              detail,
+              "Use parameterized queries",
+              mutatedRequest.url(),
+              AuditIssueSeverity.HIGH,
+              AuditIssueConfidence.CERTAIN,
+              "",
+              "",
+              AuditIssueSeverity.HIGH,
+              markedResult
             );
+            
+            // Report immediately to siteMap (survives crashes)
+            api().siteMap().add(issue);
+            issues.add(issue);
           }
         } catch (Exception e) {
           // Log error but continue with next payload
