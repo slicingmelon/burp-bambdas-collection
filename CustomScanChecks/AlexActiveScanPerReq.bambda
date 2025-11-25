@@ -1,6 +1,6 @@
 id: 7149855a-1105-4526-ab76-7a1d044badb5
-name: MySQL Time-Based Active Scan Alex
-function: SCAN_CHECK_ACTIVE_PER_INSERTION_POINT
+name: MySQL Time-Based Active Scan Alex PER REQ
+function: SCAN_CHECK_ACTIVE_PER_REQUEST
 location: SCANNER
 source: |
   /**
@@ -421,8 +421,7 @@ source: |
   };
   
   // Burp calls this once per REQUEST (not per insertion point)
-  // Collect issues and return them - Burp will add them to sitemap automatically
-  var issues = new java.util.ArrayList<AuditIssue>();
+  // We return immediately when we find an issue, so no need to collect them
   var baseRequest = requestResponse.request();
   
   if (baseRequest == null) return AuditResult.auditResult();
@@ -563,14 +562,14 @@ source: |
                   continue;
                 }
                 
-                // Add issue to list - Burp will add it to sitemap automatically when we return AuditResult
-                issues.add(issue);
-                logging().logToOutput("[MySQLTimeBased] ✓ Issue added successfully for JSON field '" + jsonField + "'");
+                // Return immediately when issue is found (like MySQLTimeBasedActiveScanPerRequest.bambda)
+                // Continuing after a finding can cause Burp internal issues
+                logging().logToOutput("[MySQLTimeBased] ✓ Returning issue immediately for JSON field '" + jsonField + "'");
+                return AuditResult.auditResult(issue);
               } catch (Throwable issueEx) {
                 // If issue creation fails, log it but don't crash - catch Throwable to catch everything
                 try {
-                  // Don't try to extract exception details - just log generic message
-                  logging().logToError("[MySQLTimeBased] Failed at issue creation for JSON field '" + jsonField + "'");
+                  logging().logToError("[MySQLTimeBased] Failed at issue creation for JSON field '" + jsonField + "': " + issueEx.getClass().getSimpleName());
                 } catch (Throwable e2) {
                   // If even logging fails, ignore silently
                 }
@@ -695,14 +694,14 @@ source: |
                 continue;
               }
               
-              // Add issue to list - Burp will add it to sitemap automatically when we return AuditResult
-              issues.add(issue);
-              logging().logToOutput("[MySQLTimeBased] ✓ Issue added successfully for param '" + name + "'");
+              // Return immediately when issue is found (like MySQLTimeBasedActiveScanPerRequest.bambda)
+              // Continuing after a finding can cause Burp internal issues
+              logging().logToOutput("[MySQLTimeBased] ✓ Returning issue immediately for param '" + name + "'");
+              return AuditResult.auditResult(issue);
             } catch (Throwable issueEx) {
               // If issue creation fails, log it but don't crash - catch Throwable to catch everything
               try {
-                // Don't try to extract exception details - just log generic message
-                logging().logToError("[MySQLTimeBased] Failed at issue creation for param '" + name + "'");
+                logging().logToError("[MySQLTimeBased] Failed at issue creation for param '" + name + "': " + issueEx.getClass().getSimpleName());
               } catch (Throwable e2) {
                 // If even logging fails, ignore silently
               }
@@ -723,7 +722,6 @@ source: |
     }
   }
   
-  // Return all issues found (or empty if none)
-  // Burp will automatically add these issues to the sitemap when we return them
-  return AuditResult.auditResult(issues);
+  // No issues found - return empty result
+  return AuditResult.auditResult();
 
