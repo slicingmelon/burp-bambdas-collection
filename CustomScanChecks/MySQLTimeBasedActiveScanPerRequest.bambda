@@ -12,6 +12,13 @@ source: |
   * @author slicingmelon
   **/
   
+  if (!requestResponse.hasResponse()) {
+    return AuditResult.auditResult();
+  }
+  
+  // Collect issues to return
+  var issues = new java.util.ArrayList<AuditIssue>();
+  
   // Configurable sleep time (in seconds)
   var DEFAULT_SLEEP_TIME = 15;
   var SLEEP_PLACEHOLDER = "§§§SLEEP_TIME§§§";
@@ -192,8 +199,6 @@ source: |
     return AuditResult.auditResult();
   }
   
-  logging().logToOutput("[MySQLTimeBased] Starting scan with " + urlParameters.size() + " URL parameter(s)");
-  
   // Iterate through each URL parameter
   for (var parameter : urlParameters) {
     String name = parameter.name();
@@ -208,8 +213,6 @@ source: |
         api().utilities().jsonUtils().isValidJson(decodedValue)) {
       
       // Handle JSON parameter - inject into each JSON field
-      logging().logToOutput("[MySQLTimeBased] Detected JSON parameter: " + name);
-      
       for (String payload : payloads) {
         var jsonMutations = injectIntoJson.apply(decodedValue, payload);
         
@@ -231,47 +234,44 @@ source: |
             if (!result.hasResponse()) continue;
             
             if (elapsedMs >= detectionThresholdMs) {
-              logging().logToOutput(String.format(
-                "[MySQLTimeBased] SQL injection detected in JSON param %s, field: %s, payload: %s",
-                name, jsonField, payload));
-              
               var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
                 name, jsonField, payload, elapsedMs);
               
-              var reqBytes = mutatedRequest.toByteArray();
-              var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
-              var payloadIndex = reqBytes.indexOf(payload);
-              var payloadLength = payload.length();
-              if (payloadIndex == -1) {
-                payloadIndex = reqBytes.indexOf(urlEncodedPayload);
-                payloadLength = urlEncodedPayload.length();
-              }
-              
+              // Try to find payload for markers (optional - skip if not found)
               var markedResult = result;
-              if (payloadIndex != -1) {
+              var reqBytes = mutatedRequest.toByteArray();
+              var payloadBytes = ByteArray.byteArray(payload);
+              var payloadIndex = reqBytes.indexOf(payloadBytes);
+              if (payloadIndex >= 0) {
                 markedResult = result.withRequestMarkers(
-                  Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
+                  Marker.marker(Range.range(payloadIndex, payloadIndex + payload.length()))
                 );
+              } else {
+                var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
+                var encodedBytes = ByteArray.byteArray(urlEncodedPayload);
+                payloadIndex = reqBytes.indexOf(encodedBytes);
+                if (payloadIndex >= 0) {
+                  markedResult = result.withRequestMarkers(
+                    Marker.marker(Range.range(payloadIndex, payloadIndex + urlEncodedPayload.length()))
+                  );
+                }
               }
               
-              var issue = AuditIssue.auditIssue(
+              issues.add(AuditIssue.auditIssue(
                 "MySQL Time-Based SQL Injection (JSON) - " + jsonField,
                 detail,
-                "Use parameterized queries",
+                "Use parameterized queries to prevent SQL injection.",
                 mutatedRequest.url(),
                 AuditIssueSeverity.HIGH,
                 AuditIssueConfidence.CERTAIN,
-                "",
+                "Time-based SQL injection allows attackers to extract data by observing response delays.",
                 "",
                 AuditIssueSeverity.HIGH,
                 markedResult
-              );
-              
-              // Report immediately to siteMap
-              api().siteMap().add(issue);
+              ));
             }
           } catch (Exception e) {
-            logging().logToError("[MySQLTimeBased] Error on JSON payload: " + e.getMessage());
+            // Continue with next payload on error
           }
         }
       }
@@ -295,57 +295,47 @@ source: |
           if (!result.hasResponse()) continue;
           
           if (elapsedMs >= detectionThresholdMs) {
-            logging().logToOutput(String.format(
-              "[MySQLTimeBased] SQL injection detected in param %s using payload: %s",
-              name, payload));
-            
             var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
               name, payload, elapsedMs);
             
-            var reqBytes = mutatedRequest.toByteArray();
-            var payloadIndex = reqBytes.indexOf(encodedPayload);
-            var payloadLength = encodedPayload.length();
-            if (payloadIndex == -1) {
-              var fullyEncodedPayload = api().utilities().urlUtils().encode(payload);
-              payloadIndex = reqBytes.indexOf(fullyEncodedPayload);
-              payloadLength = fullyEncodedPayload.length();
-            }
-            if (payloadIndex == -1) {
-              payloadIndex = reqBytes.indexOf(payload);
-              payloadLength = payload.length();
-            }
-            
+            // Try to find payload for markers (optional - skip if not found)
             var markedResult = result;
-            if (payloadIndex != -1) {
+            var reqBytes = mutatedRequest.toByteArray();
+            var encodedBytes = ByteArray.byteArray(encodedPayload);
+            var payloadIndex = reqBytes.indexOf(encodedBytes);
+            if (payloadIndex >= 0) {
               markedResult = result.withRequestMarkers(
-                Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
+                Marker.marker(Range.range(payloadIndex, payloadIndex + encodedPayload.length()))
               );
+            } else {
+              var payloadBytes = ByteArray.byteArray(payload);
+              payloadIndex = reqBytes.indexOf(payloadBytes);
+              if (payloadIndex >= 0) {
+                markedResult = result.withRequestMarkers(
+                  Marker.marker(Range.range(payloadIndex, payloadIndex + payload.length()))
+                );
+              }
             }
             
-            var issue = AuditIssue.auditIssue(
+            issues.add(AuditIssue.auditIssue(
               "MySQL Time-Based SQL Injection - " + name,
               detail,
-              "Use parameterized queries",
+              "Use parameterized queries to prevent SQL injection.",
               mutatedRequest.url(),
               AuditIssueSeverity.HIGH,
               AuditIssueConfidence.CERTAIN,
-              "",
+              "Time-based SQL injection allows attackers to extract data by observing response delays.",
               "",
               AuditIssueSeverity.HIGH,
               markedResult
-            );
-            
-            // Report immediately to siteMap
-            api().siteMap().add(issue);
+            ));
           }
         } catch (Exception e) {
-          logging().logToError("[MySQLTimeBased] Error on payload: " + e.getMessage());
+          // Continue with next payload on error
         }
       }
     }
   }
   
-  logging().logToOutput("[MySQLTimeBased] Scan completed");
-  
-  // Return empty - issues already reported to siteMap
-  return AuditResult.auditResult();
+  // Return collected issues
+  return AuditResult.auditResult(issues);
