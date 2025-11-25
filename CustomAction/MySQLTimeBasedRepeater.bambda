@@ -358,10 +358,19 @@ source: |+
         // Custom URL encode the payload (only space, +, #, =)
         var encodedPayload = customUrlEncode.apply(payload);
         
-        var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
+        // Replace the parameter value in the raw request to ensure proper encoding
+        var requestStr = new String(baseRequest.toByteArray().getBytes(), java.nio.charset.StandardCharsets.UTF_8);
         
-        // Update parameter in place (order preserved!)
-        var mutatedRequest = baseRequest.withParameter(newParam);
+        // URL-encode name and value to find them in the raw request URL
+        var encodedName = api().utilities().urlUtils().encode(name);
+        var encodedValue = api().utilities().urlUtils().encode(value);
+        
+        // Find the original parameter in the URL and append encoded payload
+        var searchPattern = encodedName + "=" + encodedValue;
+        var replaceWith = encodedName + "=" + encodedValue + encodedPayload;
+        
+        var mutatedRequestStr = requestStr.replace(searchPattern, replaceWith);
+        var mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
         
         // Add cache buster if enabled
         if (bypassCache) {

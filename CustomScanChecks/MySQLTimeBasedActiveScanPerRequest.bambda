@@ -299,17 +299,19 @@ source: |
           // Custom URL encode the payload (only space, +, #, =)
           var encodedPayload = customUrlEncode.apply(payload);
           
-          // Create new parameter with payload appended
-          // Note: we intentionally do NOT encode the whole value again here because
-          // HttpParameter.urlParameter() will encode it if it's raw characters.
-          // But if we pre-encoded it, Montoya might double-encode.
-          // The safest bet with Montoya is usually to pass raw strings if possible,
-          // OR pass the exact encoded string but use the replacement trick.
-          // Here we try passing the raw value+payload so Montoya encodes it correctly.
-          var newParam = HttpParameter.urlParameter(name, value + payload);
+          // Replace the parameter value in the raw request to ensure proper encoding
+          var requestStr = new String(baseRequest.toByteArray().getBytes(), java.nio.charset.StandardCharsets.UTF_8);
           
-          // Use withParameter to replace in-place (same as Repeater version)
-          var mutatedRequest = baseRequest.withParameter(newParam);
+          // URL-encode name and value to find them in the raw request URL
+          var encodedName = api().utilities().urlUtils().encode(name);
+          var encodedValue = api().utilities().urlUtils().encode(value);
+          
+          // Find the original parameter in the URL and append encoded payload
+          var searchPattern = encodedName + "=" + encodedValue;
+          var replaceWith = encodedName + "=" + encodedValue + encodedPayload;
+          
+          var mutatedRequestStr = requestStr.replace(searchPattern, replaceWith);
+          var mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
           
           var result = http.sendRequest(mutatedRequest);
           if (!result.hasResponse()) continue;
