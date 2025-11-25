@@ -529,7 +529,7 @@ source: |
             
             // Try to use Burp's timing data API first (more accurate)
             var timingOpt = result.timingData();
-            if (timingOpt.isPresent()) {
+            if (timingOpt != null && timingOpt.isPresent()) {
               var timing = timingOpt.get();
               java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
               java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
@@ -551,8 +551,13 @@ source: |
           // For time-based SQL injection, the delay happens during query execution
           var detectionTimeMs = (endMs != -1) ? endMs : startMs;
           
+          // Log timing for debugging - helps identify why issues aren't being created
+          logging().logToOutput(String.format(
+            "[MySQLTimeBased] JSON param '%s' field '%s' payload '%s': start=%dms, end=%dms, detection=%dms (threshold=%dms)",
+            name, jsonField, payload, startMs, endMs, detectionTimeMs, detectionThresholdMs));
+          
           if (detectionTimeMs >= detectionThresholdMs && detectionTimeMs != -1) {
-            logging().logToOutput("[MySQLTimeBased] FOUND! JSON param '" + name + "' field '" + jsonField + "' took " + startMs + "ms (start) / " + endMs + "ms (end) / detection=" + detectionTimeMs + "ms");
+            logging().logToOutput("[MySQLTimeBased] ✓ DETECTED delay " + detectionTimeMs + "ms on JSON param '" + name + "' field '" + jsonField + "' using payload '" + payload + "'");
             
             var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
               name, jsonField, payload, detectionTimeMs);
@@ -637,7 +642,7 @@ source: |
           
           // Try to use Burp's timing data API first (more accurate)
           var timingOpt = result.timingData();
-          if (timingOpt.isPresent()) {
+          if (timingOpt != null && timingOpt.isPresent()) {
             var timing = timingOpt.get();
             java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
             java.time.Duration tEnd = timing.timeBetweenRequestSentAndEndOfResponse();
@@ -659,8 +664,13 @@ source: |
         // For time-based SQL injection, the delay happens during query execution
         var detectionTimeMs = (endMs != -1) ? endMs : startMs;
         
+        // Log timing for debugging - helps identify why issues aren't being created
+        logging().logToOutput(String.format(
+          "[MySQLTimeBased] Param '%s' payload '%s': start=%dms, end=%dms, detection=%dms (threshold=%dms)",
+          name, payload, startMs, endMs, detectionTimeMs, detectionThresholdMs));
+        
         if (detectionTimeMs >= detectionThresholdMs && detectionTimeMs != -1) {
-          logging().logToOutput("[MySQLTimeBased] FOUND! Param '" + name + "' took " + startMs + "ms (start) / " + endMs + "ms (end) / detection=" + detectionTimeMs + "ms");
+          logging().logToOutput("[MySQLTimeBased] ✓ DETECTED delay " + detectionTimeMs + "ms on param '" + name + "' using payload '" + payload + "'");
           
           var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
             name, payload, detectionTimeMs);
