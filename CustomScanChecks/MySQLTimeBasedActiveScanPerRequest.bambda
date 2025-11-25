@@ -228,7 +228,7 @@ source: |
             var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
             var mutatedRequest = baseRequest.withParameter(newParam);
             
-            var result = http.sendRequest(mutatedRequest);
+            var result = api().http().sendRequest(mutatedRequest);
             if (!result.hasResponse()) continue;
             
             var timingOpt = result.timingData();
@@ -291,7 +291,7 @@ source: |
           var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
           var mutatedRequest = baseRequest.withParameter(newParam);
           
-          var result = http.sendRequest(mutatedRequest);
+          var result = api().http().sendRequest(mutatedRequest);
           if (!result.hasResponse()) continue;
           
           var timingOpt = result.timingData();
@@ -352,10 +352,6 @@ source: |
   }
   
   // Return all issues found (or empty if none)
-  if (issues.isEmpty()) {
-    return AuditResult.auditResult();
-  } else {
-    return AuditResult.auditResult();
-  }
+  return AuditResult.auditResult(issues);
 
 
