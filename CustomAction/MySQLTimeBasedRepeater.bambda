@@ -45,26 +45,23 @@ source: |+
 
   var detectionFound = false;
 
-  // Custom URL encode - only encodes space, +, #, = (characters that break URL structure)
-  var customUrlEncode = (java.util.function.Function<String, String>)(str -> {
-    return str.replace(" ", "%20")
-              .replace("+", "%2b")
-              .replace("#", "%23")
-              .replace("=", "%3D");
-  });
-
-  // Helper function to minify JSON (remove pretty-print formatting from toJsonString())
-  // Safe because: actual newlines/tabs only exist in formatting, NOT inside JSON string values
-  // (String values have escaped \n as two chars: backslash+n, not actual newline byte)
+  // Helper function to minify JSON (smarter - respects string boundaries)
   var minifyJson = (java.util.function.Function<String, String>)(jsonStr -> {
-    return jsonStr.replace("\n", "")          // Remove newlines
-                  .replace("\r", "")          // Remove carriage returns
-                  .replaceAll("\\{\\s+", "{")    // Remove spaces after {
-                  .replaceAll("\\[\\s+", "[")    // Remove spaces after [
-                  .replaceAll("\\s+\\}", "}")    // Remove spaces before }
-                  .replaceAll("\\s+\\]", "]")    // Remove spaces before ]
-                  .replaceAll(",\\s+", ",")      // Remove spaces after ,
-                  .replaceAll(":\\s+", ":");     // Remove spaces after :
+    var sb = new StringBuilder();
+    boolean inString = false;
+    for (int i = 0; i < jsonStr.length(); i++) {
+      char c = jsonStr.charAt(i);
+      if (c == '"' && (i == 0 || jsonStr.charAt(i - 1) != '\\')) {
+        inString = !inString;
+        sb.append(c);
+        continue;
+      }
+      if (!inString && Character.isWhitespace(c)) {
+        continue; // strip whitespace only outside strings
+      }
+      sb.append(c);
+    }
+    return sb.toString();
   });
 
   // Helper function to inject payload into a JSON string
@@ -277,19 +274,10 @@ source: |+
           
           logging().logToOutput(String.format("[MySQLTimeBased] Testing JSON field '%s'", jsonField));
           
-          // URL-encode the mutated JSON for proper URL formatting
-          var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
-          
-          // Replace the parameter value in the raw request to preserve encoding
-          var requestStr = new String(baseRequest.toByteArray().getBytes(), java.nio.charset.StandardCharsets.UTF_8);
-          
-          // Find the original encoded parameter value in the URL and replace with new encoded value
-          var originalEncodedValue = api().utilities().urlUtils().encode(decodedValue);
-          var searchPattern = name + "=" + originalEncodedValue;
-          var replaceWith = name + "=" + encodedMutatedJson;
-          
-          var mutatedRequestStr = requestStr.replace(searchPattern, replaceWith);
-          var mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
+          // Use Burp's withParameter() to properly replace the parameter value
+          // Pass raw JSON - Burp will handle URL encoding automatically
+          var newParam = HttpParameter.urlParameter(name, mutatedJson);
+          var mutatedRequest = baseRequest.withParameter(newParam);
           
           // Add cache buster if enabled
           if (bypassCache) {
@@ -355,22 +343,12 @@ source: |+
     } else {
       // Handle regular parameter - inject directly
       for (String payload : payloads) {
-        // Custom URL encode the payload (only space, +, #, =)
-        var encodedPayload = customUrlEncode.apply(payload);
-        
-        // Replace the parameter value in the raw request to ensure proper encoding
-        var requestStr = new String(baseRequest.toByteArray().getBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        
-        // URL-encode name and value to find them in the raw request URL
-        var encodedName = api().utilities().urlUtils().encode(name);
-        var encodedValue = api().utilities().urlUtils().encode(value);
-        
-        // Find the original parameter in the URL and append encoded payload
-        var searchPattern = encodedName + "=" + encodedValue;
-        var replaceWith = encodedName + "=" + encodedValue + encodedPayload;
-        
-        var mutatedRequestStr = requestStr.replace(searchPattern, replaceWith);
-        var mutatedRequest = HttpRequest.httpRequest(baseRequest.httpService(), mutatedRequestStr);
+        // URL-encode the payload to prevent breaking URL structure
+        var encodedPayload = api().utilities().urlUtils().encode(payload);
+        // Append encoded payload to the original value
+        var newValue = value + encodedPayload;
+        var newParam = HttpParameter.urlParameter(name, newValue);
+        var mutatedRequest = baseRequest.withParameter(newParam);
         
         // Add cache buster if enabled
         if (bypassCache) {
@@ -400,14 +378,11 @@ source: |+
           detectionFound = true;
           
           var reqBytes = mutatedRequest.toByteArray();
+          // Look for encoded payload first (that's what we used)
           var payloadIndex = reqBytes.indexOf(encodedPayload);
           var payloadLength = encodedPayload.length();
           if (payloadIndex == -1) {
-            var fullyEncodedPayload = api().utilities().urlUtils().encode(payload);
-            payloadIndex = reqBytes.indexOf(fullyEncodedPayload);
-            payloadLength = fullyEncodedPayload.length();
-          }
-          if (payloadIndex == -1) {
+            // Fallback to raw payload
             payloadIndex = reqBytes.indexOf(payload);
             payloadLength = payload.length();
           }
