@@ -209,6 +209,8 @@ source: |
         api().utilities().jsonUtils().isValidJson(decodedValue)) {
       
       // Handle JSON parameter - inject into each JSON field
+      logging().logToOutput(String.format("[MySQLTimeBased] Detected JSON param '%s' with %d payloads to test", name, payloads.size()));
+      
       for (String payload : payloads) {
         var jsonMutations = injectIntoJson.apply(decodedValue, payload);
         
@@ -217,14 +219,13 @@ source: |
             var jsonField = jsonMutation.getKey();
             var mutatedJson = jsonMutation.getValue();
             
-            // Encode mutated JSON once to keep URLs well-formed
-            var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
-            var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
+            logging().logToOutput(String.format("[MySQLTimeBased] Testing JSON param '%s' field '%s'", name, jsonField));
+            
+            // Pass raw JSON - let Montoya handle encoding (avoid double-encoding)
+            var newParam = HttpParameter.urlParameter(name, mutatedJson);
 
-            // Work around Montoya's query parser quirks by removing + re-adding the parameter
-            var mutatedRequest = baseRequest
-              .withRemovedParameters(parameter)
-              .withAddedParameters(newParam);
+            // Use withParameter to replace in-place (same as Repeater version)
+            var mutatedRequest = baseRequest.withParameter(newParam);
             
             var result = http.sendRequest(mutatedRequest);
             if (!result.hasResponse()) continue;
@@ -299,10 +300,8 @@ source: |
           // Here we try passing the raw value+payload so Montoya encodes it correctly.
           var newParam = HttpParameter.urlParameter(name, value + payload);
           
-          // Work around Montoya's query parser quirks by removing + re-adding the parameter
-          var mutatedRequest = baseRequest
-            .withRemovedParameters(parameter)
-            .withAddedParameters(newParam);
+          // Use withParameter to replace in-place (same as Repeater version)
+          var mutatedRequest = baseRequest.withParameter(newParam);
           
           var result = http.sendRequest(mutatedRequest);
           if (!result.hasResponse()) continue;

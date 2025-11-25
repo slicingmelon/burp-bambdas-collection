@@ -275,11 +275,10 @@ source: |+
           var jsonField = jsonMutation.getKey();
           var mutatedJson = jsonMutation.getValue();
           
-          // URL encode the mutated JSON (standard encoding for JSON)
-          var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
+          logging().logToOutput(String.format("[MySQLTimeBased] Testing JSON field '%s'", jsonField));
           
-          // Create new parameter with mutated JSON
-          var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
+          // Pass raw JSON - let Montoya handle encoding (avoid double-encoding)
+          var newParam = HttpParameter.urlParameter(name, mutatedJson);
           
           // Update parameter in place (order preserved!)
           var mutatedRequest = baseRequest.withParameter(newParam);
