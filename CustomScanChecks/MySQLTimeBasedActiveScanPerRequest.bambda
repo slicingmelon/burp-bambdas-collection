@@ -217,11 +217,8 @@ source: |
             var jsonField = jsonMutation.getKey();
             var mutatedJson = jsonMutation.getValue();
             
-            // URL encode the mutated JSON (standard encoding for JSON)
-            var encodedMutatedJson = api().utilities().urlUtils().encode(mutatedJson);
-            
-            // Create new parameter with mutated JSON
-            var newParam = HttpParameter.urlParameter(name, encodedMutatedJson);
+            // Create new parameter with raw mutated JSON (Montoya handles encoding internally)
+            var newParam = HttpParameter.urlParameter(name, mutatedJson);
             var mutatedRequest = baseRequest.withParameter(newParam);
             
             var result = http.sendRequest(mutatedRequest);
@@ -273,7 +270,7 @@ source: |
             }
           } catch (Exception e) {
             // Log error but continue with next payload
-            logging().logToError("[MySQLTimeBased] Error on JSON payload, continuing: " + e.getMessage());
+            logging().logToError("[MySQLTimeBased] Error on JSON payload, continuing: " + e.getClass().getSimpleName() + ": " + e.getMessage());
           }
         }
       }
