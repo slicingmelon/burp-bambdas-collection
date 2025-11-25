@@ -421,7 +421,8 @@ source: |
   };
   
   // Burp calls this once per REQUEST (not per insertion point)
-  var issues = new java.util.ArrayList();
+  // Track issue URLs to retrieve from sitemap at the end (avoid storing large HttpRequestResponse objects)
+  var issueUrls = new java.util.HashSet<String>();
   var baseRequest = requestResponse.request();
   
   if (baseRequest == null) return AuditResult.auditResult();
@@ -550,15 +551,23 @@ source: |
                 
                 if (issue == null) continue;
                 
-                logging().logToOutput("[DEBUG] Step 2: Issue created, adding to site map");
+                logging().logToOutput("[DEBUG] Step 2: Issue created, adding to site map immediately");
                 
-                // Add the issue to siteMap (siteMap.add takes AuditIssue)
-                api().siteMap().add(issue);
-                
-                logging().logToOutput("[DEBUG] Step 3: Adding to issues list");
-                issues.add(issue);
-                
-                logging().logToOutput("[DEBUG] Step 4: Success!");
+                // Add the issue to siteMap immediately (so it appears right away)
+                try {
+                  api().siteMap().add(issue);
+                  // Track the URL so we can retrieve issues from sitemap at the end
+                  issueUrls.add(requestUrl.toString());
+                  logging().logToOutput("[DEBUG] Step 3: Issue added to sitemap successfully");
+                } catch (Throwable sitemapEx) {
+                  // If sitemap add fails, still track the URL
+                  try {
+                    issueUrls.add(requestUrl.toString());
+                    logging().logToError("[MySQLTimeBased] Failed to add issue to sitemap, will return via AuditResult");
+                  } catch (Throwable e2) {
+                    // Ignore silently
+                  }
+                }
               } catch (Throwable issueEx) {
                 // If issue creation fails, log it but don't crash - catch Throwable to catch everything
                 try {
@@ -676,15 +685,23 @@ source: |
               
               if (issue == null) continue;
               
-              logging().logToOutput("[DEBUG] Step 2: Issue created, adding to site map");
+              logging().logToOutput("[DEBUG] Step 2: Issue created, adding to site map immediately");
               
-              // Add the issue to siteMap (siteMap.add takes AuditIssue)
-              api().siteMap().add(issue);
-              
-              logging().logToOutput("[DEBUG] Step 3: Adding to issues list");
-              issues.add(issue);
-              
-              logging().logToOutput("[DEBUG] Step 4: Success!");
+              // Add the issue to siteMap immediately (so it appears right away)
+              try {
+                api().siteMap().add(issue);
+                // Track the URL so we can retrieve issues from sitemap at the end
+                issueUrls.add(requestUrl.toString());
+                logging().logToOutput("[DEBUG] Step 3: Issue added to sitemap successfully");
+              } catch (Throwable sitemapEx) {
+                // If sitemap add fails, still track the URL
+                try {
+                  issueUrls.add(requestUrl.toString());
+                  logging().logToError("[MySQLTimeBased] Failed to add issue to sitemap, will return via AuditResult");
+                } catch (Throwable e2) {
+                  // Ignore silently
+                }
+              }
             } catch (Throwable issueEx) {
               // If issue creation fails, log it but don't crash - catch Throwable to catch everything
               try {
@@ -710,6 +727,34 @@ source: |
     }
   }
   
+  // Retrieve issues from sitemap to return (avoids storing large HttpRequestResponse objects in memory)
+  var issues = new java.util.ArrayList<AuditIssue>();
+  try {
+    for (var urlStr : issueUrls) {
+      try {
+        var url = api().utilities().urlUtils().url(urlStr);
+        if (url == null) continue;
+        
+        // Get all issues for this URL from sitemap
+        var urlIssues = api().siteMap().issuesForUrl(url);
+        if (urlIssues != null && !urlIssues.isEmpty()) {
+          issues.addAll(urlIssues);
+        }
+      } catch (Throwable e) {
+        // Skip if we can't retrieve issues for this URL
+        continue;
+      }
+    }
+  } catch (Throwable e) {
+    // If retrieval fails, log but don't crash
+    try {
+      logging().logToError("[MySQLTimeBased] Failed to retrieve issues from sitemap: " + e.getMessage());
+    } catch (Throwable e2) {
+      // Ignore silently
+    }
+  }
+  
   // Return all issues found (or empty if none)
+  // Issues are already in sitemap, this just returns them for audit results
   return AuditResult.auditResult(issues);
 
