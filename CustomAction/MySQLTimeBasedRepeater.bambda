@@ -265,13 +265,13 @@ source: |+
             //httpEditor.requestPane().set(mutatedRequest.toByteArray());
             detectionFound = true;
             
-            // Find payload position in request for red marker highlighting
-            var reqString = mutatedRequest.toString();
+            // Find payload position in request for red marker highlighting (using ByteArray for efficiency)
+            var reqBytes = mutatedRequest.toByteArray();
             var urlEncodedPayload = api().utilities().urlUtils().encode(payload);
-            var payloadIndex = reqString.indexOf(payload);
+            var payloadIndex = reqBytes.indexOf(payload);
             var payloadLength = payload.length();
             if (payloadIndex == -1) {
-              payloadIndex = reqString.indexOf(urlEncodedPayload);
+              payloadIndex = reqBytes.indexOf(urlEncodedPayload);
               payloadLength = urlEncodedPayload.length();
             }
             
@@ -337,16 +337,14 @@ source: |+
         
         if (startMs >= detectionThresholdMs && startMs != -1) {
           logging().logToOutput("[MySQLTimeBased] SQL injection detected in param " + name + " using payload: " + payload);
-          //httpEditor.responsePane().set(result.response().toByteArray());
-          //httpEditor.requestPane().set(mutatedRequest.toByteArray());
           detectionFound = true;
           
-          // Find payload position in request for red marker highlighting
-          var reqString = mutatedRequest.toString();
-          var payloadIndex = reqString.indexOf(encodedPayload);
+          // Find payload position in request for red marker highlighting (using ByteArray for efficiency)
+          var reqBytes = mutatedRequest.toByteArray();
+          var payloadIndex = reqBytes.indexOf(encodedPayload);
           var payloadLength = encodedPayload.length();
           if (payloadIndex == -1) {
-            payloadIndex = reqString.indexOf(payload);
+            payloadIndex = reqBytes.indexOf(payload);
             payloadLength = payload.length();
           }
           
