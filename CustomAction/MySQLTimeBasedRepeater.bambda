@@ -211,11 +211,11 @@ source: |+
   }
 
   // Filter parameters based on selection (if any)
-  java.util.List<HttpParameter> urlParameters;
+  var urlParameters = allUrlParameters; // Default to all parameters
   if (selectedText != null && !selectedText.isEmpty()) {
     var finalSelectedText = selectedText;
     // Try to match: param name, param value, or full "name=value" format
-    urlParameters = allUrlParameters.stream()
+    var filteredParams = allUrlParameters.stream()
       .filter(p -> {
         String paramName = p.name();
         String paramValue = p.value();
@@ -234,15 +234,14 @@ source: |+
       })
       .toList();
     
-    if (urlParameters.isEmpty()) {
+    if (filteredParams.isEmpty()) {
       logging().logToOutput("[MySQLTimeBased] Selection doesn't match any URL parameter. Testing all parameters...");
-      urlParameters = allUrlParameters;
     } else {
+      urlParameters = filteredParams;
       logging().logToOutput("[MySQLTimeBased] Testing only selected parameter(s): " + 
-        urlParameters.stream().map(HttpParameter::name).collect(java.util.stream.Collectors.joining(", ")));
+        urlParameters.stream().map(p -> p.name()).collect(java.util.stream.Collectors.joining(", ")));
     }
   } else {
-    urlParameters = allUrlParameters;
     logging().logToOutput("[MySQLTimeBased] No selection - testing all " + urlParameters.size() + " parameter(s).");
   }
 
@@ -250,7 +249,7 @@ source: |+
 
   logging().logToOutput("[MySQLTimeBased] Started...");
 
-  for (HttpParameter parameter : urlParameters) {
+  for (var parameter : urlParameters) {
     String name = parameter.name();
     String value = parameter.value();
     
