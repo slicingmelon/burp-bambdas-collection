@@ -19,7 +19,7 @@ source: |
   
   // Set to true to log expected errors during payload testing (network timeouts, etc.)
   // Set to false to suppress these expected errors and reduce log noise
-  var LOG_EXPECTED_ERRORS = false;
+  var LOG_EXPECTED_ERRORS = true;
   
   var payloadTemplates = java.util.List.of(
     "'XOR(if(isnull(nullif(now(),sysdate())),sleep(§§§SLEEP_TIME§§§),0))XOR'Z",
@@ -421,8 +421,8 @@ source: |
   };
   
   // Burp calls this once per REQUEST (not per insertion point)
-  // Track issue URLs to retrieve from sitemap at the end (avoid storing large HttpRequestResponse objects)
-  var issueUrls = new java.util.HashSet<String>();
+  // Collect issues and return them - Burp will add them to sitemap automatically
+  var issues = new java.util.ArrayList<AuditIssue>();
   var baseRequest = requestResponse.request();
   
   if (baseRequest == null) return AuditResult.auditResult();
@@ -551,23 +551,11 @@ source: |
                 
                 if (issue == null) continue;
                 
-                logging().logToOutput("[DEBUG] Step 2: Issue created, adding to site map immediately");
+                logging().logToOutput("[DEBUG] Step 2: Issue created, adding to issues list");
                 
-                // Add the issue to siteMap immediately (so it appears right away)
-                try {
-                  api().siteMap().add(issue);
-                  // Track the URL so we can retrieve issues from sitemap at the end
-                  issueUrls.add(requestUrl.toString());
-                  logging().logToOutput("[DEBUG] Step 3: Issue added to sitemap successfully");
-                } catch (Throwable sitemapEx) {
-                  // If sitemap add fails, still track the URL
-                  try {
-                    issueUrls.add(requestUrl.toString());
-                    logging().logToError("[MySQLTimeBased] Failed to add issue to sitemap, will return via AuditResult");
-                  } catch (Throwable e2) {
-                    // Ignore silently
-                  }
-                }
+                // Add issue to list - Burp will add it to sitemap automatically when we return AuditResult
+                issues.add(issue);
+                logging().logToOutput("[DEBUG] Step 3: Issue added to list successfully");
               } catch (Throwable issueEx) {
                 // If issue creation fails, log it but don't crash - catch Throwable to catch everything
                 try {
@@ -685,23 +673,11 @@ source: |
               
               if (issue == null) continue;
               
-              logging().logToOutput("[DEBUG] Step 2: Issue created, adding to site map immediately");
+              logging().logToOutput("[DEBUG] Step 2: Issue created, adding to issues list");
               
-              // Add the issue to siteMap immediately (so it appears right away)
-              try {
-                api().siteMap().add(issue);
-                // Track the URL so we can retrieve issues from sitemap at the end
-                issueUrls.add(requestUrl.toString());
-                logging().logToOutput("[DEBUG] Step 3: Issue added to sitemap successfully");
-              } catch (Throwable sitemapEx) {
-                // If sitemap add fails, still track the URL
-                try {
-                  issueUrls.add(requestUrl.toString());
-                  logging().logToError("[MySQLTimeBased] Failed to add issue to sitemap, will return via AuditResult");
-                } catch (Throwable e2) {
-                  // Ignore silently
-                }
-              }
+              // Add issue to list - Burp will add it to sitemap automatically when we return AuditResult
+              issues.add(issue);
+              logging().logToOutput("[DEBUG] Step 3: Issue added to list successfully");
             } catch (Throwable issueEx) {
               // If issue creation fails, log it but don't crash - catch Throwable to catch everything
               try {
@@ -727,36 +703,7 @@ source: |
     }
   }
   
-  // Retrieve issues from sitemap to return (avoids storing large HttpRequestResponse objects in memory)
-  var issues = new java.util.ArrayList<AuditIssue>();
-  try {
-    if (!issueUrls.isEmpty()) {
-      // Get all issues from sitemap and filter by our tracked URLs
-      var allIssues = api().siteMap().issues();
-      if (allIssues != null && !allIssues.isEmpty()) {
-        for (var issue : allIssues) {
-          try {
-            var issueBaseUrl = issue.baseUrl();
-            if (issueBaseUrl != null && issueUrls.contains(issueBaseUrl)) {
-              issues.add(issue);
-            }
-          } catch (Throwable e) {
-            // Skip this issue if we can't check its URL
-            continue;
-          }
-        }
-      }
-    }
-  } catch (Throwable e) {
-    // If retrieval fails, log but don't crash
-    try {
-      logging().logToError("[MySQLTimeBased] Failed to retrieve issues from sitemap: " + e.getMessage());
-    } catch (Throwable e2) {
-      // Ignore silently
-    }
-  }
-  
   // Return all issues found (or empty if none)
-  // Issues are already in sitemap, this just returns them for audit results
+  // Burp will automatically add these issues to the sitemap when we return them
   return AuditResult.auditResult(issues);
 
