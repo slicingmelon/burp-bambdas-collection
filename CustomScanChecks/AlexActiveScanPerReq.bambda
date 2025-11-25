@@ -14,7 +14,7 @@ source: |
   **/
   
   // Configurable sleep time (in seconds)
-  var DEFAULT_SLEEP_TIME = 15;
+  var DEFAULT_SLEEP_TIME = 10;
   var SLEEP_PLACEHOLDER = "§§§SLEEP_TIME§§§";
   
   // Set to true to log expected errors during payload testing (network timeouts, etc.)
@@ -521,41 +521,51 @@ source: |
             
             if (result == null || !result.hasResponse()) continue;
             
+            // Log timing for debugging
+            logging().logToOutput(String.format(
+              "[MySQLTimeBased] JSON param '%s' field '%s' payload '%s': timing=%dms (threshold=%dms)",
+              name, jsonField, payload, startMs, detectionThresholdMs));
+            
             if (startMs >= detectionThresholdMs && startMs != -1) {
               logging().logToOutput(String.format(
-                "[MySQLTimeBased] Detected delay %dms on JSON param '%s' field '%s' using payload '%s'",
+                "[MySQLTimeBased] ✓ DETECTED delay %dms on JSON param '%s' field '%s' using payload '%s'",
                 startMs, name, jsonField, payload));
               
-              var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay", 
-                name, jsonField, payload, startMs);
+              var detail = String.format("JSON param '%s' field '%s' with payload '%s' caused %dms delay (threshold: %dms)", 
+                name, jsonField, payload, startMs, detectionThresholdMs);
               
               try {
-                logging().logToOutput("[DEBUG] Step 1: Creating issue for JSON field '" + jsonField + "'");
+                // Optimize memory by copying to temp file before storing in issue
+                var optimizedResult = result.copyToTempFile();
                 
                 // Validate URL before creating issue
                 var requestUrl = mutatedRequest.url();
-                if (requestUrl == null) continue;
+                if (requestUrl == null) {
+                  logging().logToError("[MySQLTimeBased] Request URL is null, skipping issue creation");
+                  continue;
+                }
                 
                 var issue = AuditIssue.auditIssue(
                   "MySQL Time-Based SQL Injection (JSON) - " + jsonField,
                   detail,
-                  "Use parameterized queries",
+                  "Use parameterized queries to prevent SQL injection. Time-based SQL injection allows attackers to extract data by observing response delays.",
                   requestUrl,
                   AuditIssueSeverity.HIGH,
                   AuditIssueConfidence.CERTAIN,
-                  "Background information",
-                  "Remediation details",
+                  "Time-based SQL injection vulnerabilities occur when user input is directly concatenated into SQL queries without proper sanitization. The application executes SQL functions like SLEEP() that cause measurable delays in response times, allowing attackers to infer information about the database structure and data.",
+                  "Implement parameterized queries (prepared statements) to separate SQL code from data. Validate and sanitize all user inputs. Use a web application firewall (WAF) to detect and block SQL injection attempts.",
                   AuditIssueSeverity.HIGH,
-                  result
+                  optimizedResult
                 );
                 
-                if (issue == null) continue;
-                
-                logging().logToOutput("[DEBUG] Step 2: Issue created, adding to issues list");
+                if (issue == null) {
+                  logging().logToError("[MySQLTimeBased] Issue creation returned null");
+                  continue;
+                }
                 
                 // Add issue to list - Burp will add it to sitemap automatically when we return AuditResult
                 issues.add(issue);
-                logging().logToOutput("[DEBUG] Step 3: Issue added to list successfully");
+                logging().logToOutput("[MySQLTimeBased] ✓ Issue added successfully for JSON field '" + jsonField + "'");
               } catch (Throwable issueEx) {
                 // If issue creation fails, log it but don't crash - catch Throwable to catch everything
                 try {
@@ -643,41 +653,51 @@ source: |
           
           if (result == null || !result.hasResponse()) continue;
           
+          // Log timing for debugging
+          logging().logToOutput(String.format(
+            "[MySQLTimeBased] Param '%s' payload '%s': timing=%dms (threshold=%dms)",
+            name, payload, startMs, detectionThresholdMs));
+          
           if (startMs >= detectionThresholdMs && startMs != -1) {
             logging().logToOutput(String.format(
-              "[MySQLTimeBased] Detected delay %dms on param '%s' using payload '%s'",
+              "[MySQLTimeBased] ✓ DETECTED delay %dms on param '%s' using payload '%s'",
               startMs, name, payload));
             
-            var detail = String.format("Param '%s' with payload '%s' caused %dms delay", 
-              name, payload, startMs);
+            var detail = String.format("Param '%s' with payload '%s' caused %dms delay (threshold: %dms)", 
+              name, payload, startMs, detectionThresholdMs);
             
             try {
-              logging().logToOutput("[DEBUG] Step 1: Creating issue for param '" + name + "'");
+              // Optimize memory by copying to temp file before storing in issue
+              var optimizedResult = result.copyToTempFile();
               
               // Validate URL before creating issue
               var requestUrl = mutatedRequest.url();
-              if (requestUrl == null) continue;
+              if (requestUrl == null) {
+                logging().logToError("[MySQLTimeBased] Request URL is null, skipping issue creation");
+                continue;
+              }
               
               var issue = AuditIssue.auditIssue(
                 "MySQL Time-Based SQL Injection - " + name,
                 detail,
-                "Use parameterized queries",
+                "Use parameterized queries to prevent SQL injection. Time-based SQL injection allows attackers to extract data by observing response delays.",
                 requestUrl,
                 AuditIssueSeverity.HIGH,
                 AuditIssueConfidence.CERTAIN,
-                "Background information",
-                "Remediation details",
+                "Time-based SQL injection vulnerabilities occur when user input is directly concatenated into SQL queries without proper sanitization. The application executes SQL functions like SLEEP() that cause measurable delays in response times, allowing attackers to infer information about the database structure and data.",
+                "Implement parameterized queries (prepared statements) to separate SQL code from data. Validate and sanitize all user inputs. Use a web application firewall (WAF) to detect and block SQL injection attempts.",
                 AuditIssueSeverity.HIGH,
-                result
+                optimizedResult
               );
               
-              if (issue == null) continue;
-              
-              logging().logToOutput("[DEBUG] Step 2: Issue created, adding to issues list");
+              if (issue == null) {
+                logging().logToError("[MySQLTimeBased] Issue creation returned null");
+                continue;
+              }
               
               // Add issue to list - Burp will add it to sitemap automatically when we return AuditResult
               issues.add(issue);
-              logging().logToOutput("[DEBUG] Step 3: Issue added to list successfully");
+              logging().logToOutput("[MySQLTimeBased] ✓ Issue added successfully for param '" + name + "'");
             } catch (Throwable issueEx) {
               // If issue creation fails, log it but don't crash - catch Throwable to catch everything
               try {
